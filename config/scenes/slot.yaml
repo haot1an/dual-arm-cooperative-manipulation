@@ -1,0 +1,97 @@
+# 场景 1：长板转向 + 窄槽插入 + 避碰 —— SceneSpec（由 tools/design_slot.py --write 生成）
+# 几何设计与可行性 / 判别性验证见 docs/slot_design.md。
+name: slot
+description: 长板滚转 90° 后插入窄槽（对称协作，刚性抓取，相对自由度 0）
+model: models/scene_slot.xml
+
+object:
+  body: plate
+  geom: plate_geom
+
+# 两臂沿板长轴水平接近，在两端面中心夹住板厚（20 mm）：finger_opening = T/2 + 1 mm
+grasps:
+  left:  {site: grasp_L, weld: weld_L, finger_opening: 0.011}
+  right: {site: grasp_R, weld: weld_R, finger_opening: 0.011}
+
+# 两个 rigid 约束 → 两臂之间相对自由度 0 → 内力空间 6 维（其中绕长轴的“扭转”内力矩对姿态误差最敏感）
+constraints:
+  - {name: weld_L, type: rigid, body1: left_hand, body2: plate, relative_dof: 0}
+  - {name: weld_R, type: rigid, body1: right_hand, body2: plate, relative_dof: 0}
+
+obstacles:
+  pairs:
+    - [left_arm, right_arm]
+    - [left_arm, table_top]
+    - [right_arm, table_top]
+    - [left_arm, post_L]
+    - [right_arm, post_R]
+    - [left_arm, slot_frame]
+    - [right_arm, slot_frame]
+    - [left_arm, riser]
+    - [right_arm, riser]
+    # 装配允许间隙：板在槽底和初始支撑面处的设计间隙均为 1 mm。
+    # 其余 pair 使用 torque_qp 的全局 10 mm 安全距离。
+    - {a: object, b: slot_frame, safe_distance: 0.001}
+    - {a: object, b: riser, safe_distance: 0.001}
+    - [object, post_L]
+    - [object, post_R]
+
+# 物体（板中心）航点。rolled 之后板绕世界 x 轴转 -90°（竖直，厚度方向沿 y）
+waypoints:
+  - {name: grasp,       pos: [0.0, -0.4500, 0.8760], rpy_deg: [0, 0, 0]}
+  - {name: lifted,      pos: [0.0, -0.4500, 1.1310], rpy_deg: [0, 0, 0]}
+  - {name: rolled,      pos: [0.0, -0.4500, 1.1310], rpy_deg: [-90, 0, 0]}
+  - {name: pre_insert,  pos: [0.0, -0.6500, 1.1310], rpy_deg: [-90, 0, 0]}
+  - {name: inserted,    pos: [0.0, -0.6500, 1.0510], rpy_deg: [-90, 0, 0]}
+
+cameras: [cam_iso, cam_front]
+
+# 窄槽参数（供日志 / 绘图使用：滚转同步误差、插入深度）
+slot:
+  width: 0.04          # [m] 槽宽（y）
+  depth: 0.05          # [m] 插入深度
+  mouth_z: 1.0000      # [m] 槽口高度（世界系）
+  center_y: -0.6500   # [m] 槽中心 y
+  roll_axis: [1, 0, 0]       # 滚转轴（世界系，= 板长轴）
+  roll_deg: -90
+
+# 初始关节角（抓取位姿，由 tools/calibrate_base.py --write 按最终布局求解后写入）
+q_init:
+  left:  [0.821260, 0.609877, -0.273083, -2.244896, -1.206165, 1.611843, -1.123575]
+  right: [-0.871891, 0.618396, 0.323701, -2.246911, 1.187778, 1.636811, -0.439111]
+
+# 生成本场景所用的几何参数（tools/design_slot.py 的 SlotParams）
+design:
+  L: 0.6
+  W: 0.2
+  T: 0.02
+  mass: 1.2
+  grasp_inset: 0.01
+  y_start: -0.45
+  riser_h: 0.115
+  lift_extra: 0.03
+  roll_deg: 90.0
+  roll_sign: -1
+  slot_dy: 0.2
+  slot_h: 0.25
+  slot_w: 0.04
+  slot_D: 0.05
+  wall_t: 0.05
+  pre_insert: 0.03
+  post_x: 0.62
+  post_dy: 0.08
+  post_r: 0.025
+  post_top: 0.3
+  finger_sign_left: 1
+  finger_sign_right: 1
+
+overrides:
+  object_trajectory:
+    waypoints:
+      v_max: 0.08
+      a_max: 0.20
+  controller:
+    torque_qp:
+      # 速度阻尼器斜率；较大的边界速度避免槽底 pair 较晚进入 top-8 时产生瞬时制动。
+      collision_max_approach_speed: 0.30
+      admm_max_iterations: 80

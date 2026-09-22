@@ -1,0 +1,131 @@
+<!--
+  dual_panda_scene.xml —— 双 Franka Panda（带 Franka Hand）刚性夹持同一箱子的协同搬运场景
+  ======================================================================================
+  世界系 W：原点在地面、两基座连线中点的正下方，z 轴向上。
+    工作台：台面高 0.80 m（纯视觉，不参与接触），两台 Panda 安装在台面上，面对面。
+    左臂 (arm 1, 前缀 left_)  基座 (-0.745, 0, 0.80)，朝 +x（yaw = 0）
+    右臂 (arm 2, 前缀 right_) 基座 (+0.745, 0, 0.80)，朝 -x（yaw = 180°）
+    箱子 0.40 x 0.07 x 0.12 m（长轴沿 x），2 kg，底面在台面上方 2.5 cm，中心 (0, 0, 0.885)。
+  抓取方式：夹爪竖直向下，在箱子两端（距端面 3 cm）夹住箱子的 ±y 侧面，TCP 在顶面下方 2 cm。
+    Franka Hand 最大开度 80 mm，因此被夹宽度取 0.07 m；手指固定开度 = 0.07/2 + 1 mm = 0.036 m，
+    指面与箱子侧面各留 1 mm 间隙（视觉上贴合、无穿透，tests/test_scene_geometry.cpp 检查）。
+  两臂初始关节角相同（平面肘上构型）：
+    q_init = [0, 0.378146, 0, -2.130506, 0, 2.508653, 0.785398]
+    TCP（ee_site）在基座系 (0.575, 0, 0.125)，竖直向下；cond(J) = 9.6，归一化关节裕度 ≥ 0.31。
+    箱子平移 ±0.15 m、绕各轴转 ±20° 时两臂仍有 IK 解，裕度 ≥ 0.14、cond(J) ≤ 15。
+
+  注意：C++ 端（SimEnv / MujocoRobotModel）以 config/default.yaml 中的基座位姿与 q_init 为准，
+  会在编译前覆盖 left_base/right_base 的位姿，并在 mj_forward 后按当前相对位姿重设 weld 的 relpose。
+  这里的数值是与 config 一致的名义值，保证用 MuJoCo 自带 simulate 直接打开时也正确。
+
+  依赖：MuJoCo >= 3.2（<model>/<attach>）。机械臂模型见 panda_hand_torque.xml。
+-->
+<mujoco model="dual_panda_scene">
+  <compiler angle="radian" autolimits="true"/>
+
+  <!-- 1 kHz 仿真/控制；implicitfast 对关节阻尼隐式积分；jacobian=dense 使 efc_J 为稠密矩阵
+       （nv=20 时 auto 本来也是 dense，这里显式写出，SimEnv 同时兼容稀疏格式）。 -->
+  <option timestep="0.001" integrator="implicitfast" gravity="0 0 -9.81" impratio="10" jacobian="dense"/>
+
+  <statistic center="0 0 0.95" extent="1.6"/>
+
+  <visual>
+    <headlight diffuse="0.55 0.55 0.55" ambient="0.35 0.35 0.35" specular="0 0 0"/>
+    <rgba haze="0.93 0.93 0.93 1"/>
+    <global azimuth="-125" elevation="-25" offwidth="1600" offheight="1200"/>
+    <quality shadowsize="4096"/>
+    <scale forcewidth="0.02" contactwidth="0.05" contactheight="0.02" framelength="0.12" framewidth="0.006"/>
+  </visual>
+
+  <asset>
+    <model name="panda" file="panda_hand_torque.xml"/>
+
+    <texture type="skybox" builtin="gradient" rgb1="0.97 0.97 0.97" rgb2="0.80 0.82 0.85" width="512" height="3072"/>
+    <!-- 素色地板 + 淡网格（0.25 m 一格） -->
+    <texture type="2d" name="floor_grid" builtin="flat" mark="edge" rgb1="0.90 0.90 0.89" markrgb="0.80 0.80 0.79"
+      width="512" height="512"/>
+    <material name="floor" texture="floor_grid" texuniform="true" texrepeat="4 4" reflectance="0.05"/>
+    <material name="table_top" rgba="0.72 0.64 0.52 1" specular="0.1"/>
+    <material name="table_leg" rgba="0.35 0.35 0.37 1"/>
+    <material name="box_mat" rgba="0.78 0.58 0.34 1" specular="0.05"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 -0.6 3.2" dir="0 0.2 -1" directional="true" diffuse="0.55 0.55 0.55" castshadow="true"/>
+    <light pos="2 2 2.5" dir="-1 -1 -1" directional="true" diffuse="0.2 0.2 0.2" castshadow="false"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="floor"/>
+
+    <!-- 固定相机（都对准 (0, 0, 0.97)）：保证不同实验的截图 / 录像视角一致。
+         cam_iso：等轴测视角；cam_front：从 −y 正视两臂连线（左臂在画面左侧）。 -->
+    <camera name="cam_iso" pos="1.25 -1.45 1.72" xyaxes="0.7574 0.6529 0.0000 -0.2382 0.2763 0.9311"/>
+    <camera name="cam_front" pos="0 -2.25 1.32" xyaxes="1.0000 0.0000 0.0000 0.0000 0.1537 0.9881"/>
+
+    <!-- 工作台：台面高 0.80 m（顶面放在 0.7999，避免 link0 网格底面 0.03 mm 的视觉重叠），
+         只提供尺度参照，不参与任何接触（contype = conaffinity = 0） -->
+    <body name="table">
+      <geom name="table_top" type="box" size="1.0 0.45 0.02" pos="0 0 0.7799" material="table_top"
+        contype="0" conaffinity="0"/>
+      <geom name="table_leg1" type="box" size="0.025 0.025 0.38" pos="0.94 0.39 0.38" material="table_leg"
+        contype="0" conaffinity="0"/>
+      <geom name="table_leg2" type="box" size="0.025 0.025 0.38" pos="-0.94 0.39 0.38" material="table_leg"
+        contype="0" conaffinity="0"/>
+      <geom name="table_leg3" type="box" size="0.025 0.025 0.38" pos="0.94 -0.39 0.38" material="table_leg"
+        contype="0" conaffinity="0"/>
+      <geom name="table_leg4" type="box" size="0.025 0.025 0.38" pos="-0.94 -0.39 0.38" material="table_leg"
+        contype="0" conaffinity="0"/>
+    </body>
+
+    <!-- 基座安装 body：SimEnv 通过 mjSpec 修改这两个 body 的 pos/quat 来设置名义位姿与标定误差 -->
+    <body name="left_base" pos="-0.745 0 0.80">
+      <attach model="panda" body="link0" prefix="left_"/>
+    </body>
+    <body name="right_base" pos="0.745 0 0.80" quat="0 0 0 1">
+      <attach model="panda" body="link0" prefix="right_"/>
+    </body>
+
+    <!-- 箱子 0.40 x 0.07 x 0.12 m, 2 kg；箱子坐标系 o 在几何中心（= 质心），长轴沿箱子 x 轴。 -->
+    <body name="box" pos="0 0 0.885">
+      <freejoint name="box_joint"/>
+      <geom name="box_geom" type="box" size="0.2 0.035 0.06" mass="2" material="box_mat"/>
+      <!-- 抓取点（TCP 目标）：距两端面 3 cm、顶面下 2 cm。site 坐标系与初始构型下对应的 ee_site 重合：
+           z 竖直向下（接近方向），y 为手指开合方向。 -->
+      <site name="grasp_left"  pos="-0.17 0 0.04" quat="0 1 0 0" size="0.008" rgba="0 0.8 0 1"/>
+      <site name="grasp_right" pos="0.17 0 0.04"  quat="0 0 1 0" size="0.008" rgba="0 0.8 0 1"/>
+      <site name="box_center" size="0.008" rgba="0 0 1 1"/>
+    </body>
+  </worldbody>
+
+  <!-- 刚性夹持：hand 与箱子之间的 weld（软约束，刚度由 solref/solimp 决定，SimEnv 可按 config 覆盖）。
+       body1 = <arm>_hand, body2 = box；anchor = 抓取点在箱子系中的坐标；
+       relpose = ee_site 与抓取点重合时，anchor 点在 hand 系中的位置 (0 0 0.1034) + box 相对 hand 的姿态。
+       SimEnv 默认在 mj_forward 后按当前实际相对位姿重算 relpose（init_mode: current），t=0 无预载内力。
+       手指不参与受力：夹持力全部经 weld 传递（原因见 docs/cooperative_control.md §8）。 -->
+  <equality>
+    <weld name="weld_left" body1="left_hand" body2="box" anchor="-0.17 0 0.04"
+      relpose="0 0 0.1034 0 1 0 0" solref="0.004 1" solimp="0.95 0.99 0.001 0.5 2"/>
+    <weld name="weld_right" body1="right_hand" body2="box" anchor="0.17 0 0.04"
+      relpose="0 0 0.1034 0 0 1 0" solref="0.004 1" solimp="0.95 0.99 0.001 0.5 2"/>
+  </equality>
+
+  <!-- 夹爪 / 腕部与箱子之间不产生接触（夹持力完全由 weld 传递；指面与箱子留 1 mm 间隙） -->
+  <contact>
+    <exclude body1="left_hand" body2="box"/>
+    <exclude body1="left_left_finger" body2="box"/>
+    <exclude body1="left_right_finger" body2="box"/>
+    <exclude body1="left_link7" body2="box"/>
+    <exclude body1="left_link6" body2="box"/>
+    <exclude body1="right_hand" body2="box"/>
+    <exclude body1="right_left_finger" body2="box"/>
+    <exclude body1="right_right_finger" body2="box"/>
+    <exclude body1="right_link7" body2="box"/>
+    <exclude body1="right_link6" body2="box"/>
+  </contact>
+
+  <keyframe>
+    <!-- qpos: 左臂 7 + 右臂 7 + 箱子 free joint 7 (pos, quat w x y z) -->
+    <key name="grasp"
+      qpos="0 0.378146 0 -2.130506 0 2.508653 0.785398
+            0 0.378146 0 -2.130506 0 2.508653 0.785398
+            0 0 0.885 1 0 0 0"/>
+  </keyframe>
+</mujoco>

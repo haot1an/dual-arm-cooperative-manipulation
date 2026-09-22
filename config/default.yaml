@@ -1,0 +1,197 @@
+# 双 Franka Panda 协同操作仿真 —— 默认配置（所有场景共用）
+# ---------------------------------------------------------------------------
+# 相对路径均相对于工程根目录（/home/tt/dual_arm_ws）。
+# 加载顺序：本文件 → config/scenes/<scene>.yaml 中的 overrides → 命令行 --set a.b.c=value。
+# 例：./build/run_sim --scene slot --set calibration_error.enabled=true
+# 每次运行都会把“应用覆盖后的实际配置”保存到 logs/<时间戳>_<场景>_<控制器>/config.yaml。
+# ---------------------------------------------------------------------------
+
+scene: lift                  # lift | slot | slot_avoid | assembly | assembly_simple（--scene 覆盖）
+scene_dir: config/scenes     # 场景描述文件目录：<scene_dir>/<scene>.yaml
+
+simulation:
+  timestep: 0.001            # [s] 写入 mjModel.opt.timestep；控制频率 = 1/timestep = 1 kHz
+  duration: 10.0             # [s] 仿真时长；可视化模式下 <= 0 表示一直运行直到关闭窗口
+  realtime: true             # 可视化模式下按实时速率推进（--headless 总是全速运行）
+  contacts: true             # false：关闭所有接触（只保留 weld / 关节等约束），用于“纯闭链内力”实验
+
+# 基座布局（三个场景共用，代码中不含任何布局假设）。
+# 两台 Panda 装在 0.75 m 高的台面上、靠近操作者一侧（y = 0），沿 x 左右分开，各自向内偏转，朝 −y 工作。
+# 肩距与内偏角由 tools/calibrate_base.py 在网格上搜索选出（评估表见 docs/base_calibration.md）。
+#   左臂（+x）：yaw = −90° − 内偏角；右臂（−x）：yaw = −90° + 内偏角。
+# 控制器模型使用这里的名义位姿；仿真 plant 在此基础上叠加 calibration_error。
+layout:
+  left:
+    base_pos: [0.3750, 0.0000, 0.7500]      # [m]
+    base_rpy_deg: [0.0, 0.0, -105.00]  # [deg]，R = Rz(yaw) Ry(pitch) Rx(roll)
+  right:
+    base_pos: [-0.3750, 0.0000, 0.7500]
+    base_rpy_deg: [0.0, 0.0, -75.00]
+
+# 标定误差注入：只影响仿真 plant 中右臂基座的真实位姿，控制器模型仍使用上面的名义位姿。
+#   p_true = p_nominal + right_base_offset_xyz                  （世界系）
+#   R_true = R(right_base_offset_rpy_deg) · R_nominal           （绕基座原点，世界系轴）
+calibration_error:
+  enabled: false
+  right_base_offset_xyz: [0.003, -0.003, 0.002]    # [m]
+  right_base_offset_rpy_deg: [0.0, 0.0, 0.3]       # [deg]
+
+# 场景中所有 rigid 型闭链约束（weld）的公共设置
+weld:
+  # current: t=0 时 mj_forward 后按实际相对位姿设置 relpose → 初始无预载内力（默认）
+  # nominal: 夹爪 weld 按名义几何（ee_site 与抓取点完全重合）设置 relpose
+  #          → 有标定误差时 t=0 就存在“装配误差”，产生预载内力（在 nominal_ramp_time 内平滑过渡）
+  init_mode: current
+  nominal_ramp_time: 0.5     # [s]
+  # MuJoCo 软约束参数（覆盖 XML 中的值）：timeconst 越小约束越“硬”，但必须 >= 2*timestep。
+  solref: [0.004, 1.0]
+  solimp: [0.95, 0.99, 0.001, 0.5, 2.0]
+
+# 外力 / 外力矩扰动（通过 xfrc_applied 作用在 body 质心），可有多段。梯形剖面：
+#   在 [t_start, t_start+ramp] 线性升到满值，保持到 t_end−ramp，再在 [t_end−ramp, t_end] 线性降到 0。
+#   frame: world（力/力矩在世界系下给出）| body（在该 body 坐标系下给出）；body 缺省 = 场景主物体。
+disturbances:
+  - enabled: true
+    t_start: 3.0
+    t_end: 3.5
+    ramp: 0.0
+    frame: world
+    force: [0.0, 0.0, -10.0]        # [N]
+    torque: [0.0, 0.0, 0.0]         # [N·m]
+
+sensors:
+  # MuJoCo 3.12 的 force/torque 传感器把 weld 转动约束力 efc_force[3:6] 直接当作世界系力矩，
+  # 而约束实际施加的力矩是 Jᵀf（转动行雅可比带 0.5 系数）→ 腕部力矩读数中 weld 引起的部分偏大约一倍
+  # （tests/test_sensors_weld.cpp 中有复现）。true：按 Jᵀf 精确修正（推荐）；false：保留 MuJoCo 原始读数。
+  fix_weld_torque: true
+
+# 物体参考轨迹（基线与协同控制器共用；日志中的 obj_err_* 相对于它计算）
+object_trajectory:
+  type: waypoints                # waypoints | hold | min_jerk | sine
+  # waypoints：沿场景航点插值（位置直线 + 姿态 slerp，公共路径参数采用梯形速度剖面），
+  #            每段时长由速度/加速度上限决定，航点处停留 dwell 秒
+  waypoints:
+    t_start: 1.0                 # [s] 开始运动的时刻（之前保持第一个航点）
+    v_max: 0.15                  # [m/s]   平移速度上限
+    a_max: 0.30                  # [m/s²]  平移加速度上限
+    w_max: 0.60                  # [rad/s] 转动角速度上限
+    alpha_max: 1.20              # [rad/s²] 转动角加速度上限
+    dwell: 0.5                   # [s] 每个航点停留时间
+  min_jerk:
+    t_start: 1.0
+    t_end: 3.0
+    offset_xyz: [0.0, -0.10, 0.10]
+    offset_rpy_deg: [0.0, 0.0, 0.0]
+  sine:
+    t_start: 1.0
+    frequency: 0.25
+    amplitude_xyz: [0.0, 0.0, 0.05]
+    axis: [0.0, 0.0, 1.0]
+    amplitude_deg: 0.0
+
+# 距离查询（CollisionModel）：对场景 obstacles 中列出的 geom 对计算有符号距离与 ∂d/∂q
+collision:
+  margin: 0.20                   # [m] 距离小于它的 geom 对才会被报告（MuJoCo pair margin）
+  max_pairs: 1024                # geom 对数量上限（缓冲区预分配）
+  # 查询耗时（单线程，本机）：lift ~0.15 ms、slot ~0.65 ms、assembly ~1.0 ms；threads: 4 时约 0.09 / 0.23 / 0.27 ms。
+  # 1 kHz 控制环中每周期都查询时建议开线程池，或降低查询频率 / 减小 margin。
+  threads: 0                     # > 1：MuJoCo 线程池并行窄相碰撞（0 = 单线程）
+
+controller:
+  type: gravity_pd  # gravity_pd | cartesian_impedance | coop | qp_coop | asym_coop | qp_asym_coop
+  gravity_pd:                    # 重力补偿 + 关节 PD 保持初始构型（仅用于验证环境）
+    kp: [600.0, 600.0, 600.0, 600.0, 250.0, 150.0, 50.0]    # [N·m/rad]
+    kd: [50.0, 50.0, 50.0, 50.0, 30.0, 25.0, 15.0]          # [N·m·s/rad]
+    # 可选的按臂覆盖（例如装配场景手动拧螺钉：右臂 joint7 不做位置保持，只加恒定力矩）：
+    # right: {kp: [..7..], kd: [..7..], extra_torque: [..7..]}
+
+  cartesian_impedance:
+    # 单臂增益。两臂共同作用后的等效刚度大致为两者之和。
+    stiffness: [400.0, 400.0, 400.0, 30.0, 30.0, 30.0]
+    damping:   [40.0, 40.0, 40.0, 3.0, 3.0, 3.0]
+    load_share_left: 0.5
+
+  coop:                          # 对称协同控制器参数占位：含义由你在 CoopController 中定义
+    object_stiffness: [800.0, 800.0, 800.0, 60.0, 60.0, 60.0]   # K_o 对角 [N/m, N·m/rad]
+    object_damping:   [80.0, 80.0, 80.0, 6.0, 6.0, 6.0]         # D_o 对角 [N·s/m, N·m·s/rad]
+    internal_wrench_des: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]        # 期望内力的 6 维坐标 h_r（见文档 §4）
+    internal_force_gain: 0.0
+    load_share_left: 0.5         # 加权伪逆中左臂承担的负载份额（0..1），见文档 §5
+    nullspace_kp: 10.0
+    nullspace_kd: 2.0
+    internal_wrench_ramp_time: 0.5  # [s]
+  asym_coop:
+    holding_arm: left
+
+    holding_stiffness:
+      [3000.0, 3000.0, 3000.0, 200.0, 200.0, 200.0]
+
+    holding_damping:
+      [100.0, 100.0, 100.0, 10.0, 10.0, 10.0]
+
+    # 作业臂在螺旋自由度 S 的五维正交补空间中保持工具对准。
+    working_constraint_stiffness:
+      [1200.0, 1200.0, 1200.0, 80.0, 80.0, 80.0]
+
+    working_constraint_damping:
+      [60.0, 60.0, 60.0, 5.0, 5.0, 5.0]
+
+    axial_preload_force: 5.0       # [N] 沿 -axis 压向工件
+    axial_preload_gain: 0.2        # 力误差比例反馈
+    axial_preload_limit: 10.0      # [N]
+    axial_preload_ramp_time: 0.5   # [s] smoothstep
+    preload_ready_tolerance: 0.5   # [N]
+    preload_ready_hold_time: 0.2   # [s]
+
+    wrench_filter_time_constant: 0.02  # [s]
+    seat_torque_threshold: 0.30        # [N·m]
+    seat_detect_hold_time: 0.10        # [s]
+
+    tightening_torque: 1.0            # [N·m]，当前单次腕部行程的稳定演示目标
+    tightening_admittance: 0.2        # [rad/(s·N·m)]
+    tightening_max_rate: 0.05         # [rad/s]
+    tightening_torque_limit: 3.0      # [N·m]
+    tightening_torque_ramp_time: 1.0  # [s]
+
+    completion_torque_tolerance: 0.10   # [N·m]
+    completion_speed_threshold: 0.05    # [rad/s]
+    completion_preload_tolerance: 0.5   # [N]
+    completion_hold_time: 0.30          # [s]
+
+    task_gain: 8.0          # [N·m/rad]
+    task_damping: 0.8       # [N·m·s/rad]
+    task_torque_limit: 3.0  # [N·m]
+
+  # 闭链力矩 QP：28 维决策 [ddq(14), lambda(6), collision_slack(8)]。
+  torque_qp:
+    tracking_weight: 1.0
+    smoothing_weight: 0.01
+    torque_margin: 0.5      # [N·m]，相对执行器额定力矩上限的安全裕量
+    joint_position_margin: 0.10       # [rad]
+    joint_prediction_horizon: 0.10    # [s]
+    joint_velocity_limit: [2.175, 2.175, 2.175, 2.175, 2.61, 2.61, 2.61]  # [rad/s]
+    joint_acceleration_limit: [15.0, 15.0, 15.0, 15.0, 20.0, 20.0, 20.0] # [rad/s²]
+    closed_chain_velocity_damping: 20.0  # [1/s]，受约束相对速度的 Baumgarte 阻尼
+    constraint_wrench_regularization: 1.0e-4
+    collision_avoidance_enabled: true
+    collision_safe_distance: 0.010       # [m]
+    collision_influence_distance: 0.030  # [m]
+    collision_max_approach_speed: 0.10   # [m/s]
+    collision_slack_weight: 1.0e6
+    collision_max_constraints: 8
+    collision_threads: 4
+    reference_governor:
+      enabled: false
+      obstacle_group: ""
+      trigger_distance: 0.08
+      release_distance: 0.06
+      avoidance_offset: 0.15
+      offset_speed: 0.12
+      preferred_direction: [0.0, 0.0, 1.0]
+    admm_rho: 1.0
+    admm_max_iterations: 40
+    admm_tolerance: 1.0e-5
+log:
+  enabled: true
+  dir: logs                      # 每次运行生成 logs/<YYYYmmdd_HHMMSS>_<scene>_<controller>[_calib]/
+  decimation: 1                  # 每 N 个仿真步记录一行（1 = 每个控制周期）

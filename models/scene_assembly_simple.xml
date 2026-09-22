@@ -1,0 +1,67 @@
+<!--
+  scene_assembly_simple.xml —— 场景 2 的退化版本：工具直接 weld 到工件（无螺钉自由度，相对自由度 = 0）
+  ============================================================================================
+  几何与 scene_assembly.xml 完全相同，但螺钉只是工件上的视觉零件（没有关节），右手工具尖端直接 weld 到工件。
+  用 config 中的力矩剖面（disturbances，作用在工件上、绕孔轴）模拟旋拧的反作用力矩，
+  先跑通“左臂抑制反作用力矩”这一件事。
+-->
+<mujoco model="scene_assembly_simple">
+  <include file="workcell.xml"/>
+
+  <worldbody>
+    <camera name="cam_iso" pos="0.75 0.55 1.75" xyaxes="-0.8000 0.6000 0.0000 -0.3374 -0.4498 0.8269"/>
+    <camera name="cam_front" pos="0.35 -1.35 1.45" xyaxes="0.9249 0.3802 0.0000 -0.1871 0.4551 0.8706"/>
+
+    <body name="fixture" pos="0 -0.45 0.80">
+      <geom name="fixture" class="prop" size="0.15 0.06 0.05" material="prop_grey"/>
+    </body>
+
+    <body name="workpiece" pos="0 -0.45 0.875">
+      <freejoint name="workpiece_joint"/>
+      <geom name="workpiece_geom" type="box" size="0.13 0.025 0.015" mass="0.7" material="metal"/>
+      <geom name="workpiece_boss" type="cylinder" size="0.012 0.0152" pos="-0.10 0 0" material="prop_dark"
+        contype="0" conaffinity="0" mass="0"/>
+      <site name="grasp_L" pos="0.10 0 0.005" quat="0 0 -1 0" size="0.008" rgba="0 0.8 0 1"/>
+      <site name="hole" pos="-0.10 0 0.015" size="0.004" rgba="1 0.8 0 1"/>
+      <!-- 螺钉（固定在工件上，仅视觉） -->
+      <geom name="screw_head" type="cylinder" size="0.0065 0.0025" pos="-0.10 0 0.018" material="prop_dark"
+        contype="0" conaffinity="0" mass="0"/>
+      <site name="screw_head_top" pos="-0.10 0 0.0205" size="0.003" rgba="1 0 1 1"/>
+    </body>
+
+    <body name="tool" pos="-0.10 -0.45 0.8955">
+      <freejoint name="tool_joint"/>
+      <geom name="tool_socket" type="cylinder" size="0.009 0.010" pos="0 0 0.010" material="prop_dark" mass="0.03"/>
+      <geom name="tool_shaft" type="cylinder" size="0.006 0.060" pos="0 0 0.060" material="metal" mass="0.08"/>
+      <geom name="tool_mark" type="box" size="0.0095 0.0015 0.004" pos="0 0 0.016" rgba="0.9 0.9 0.2 1"
+        contype="0" conaffinity="0" mass="0"/>
+      <site name="grasp_R" pos="0 0 0.09" quat="0 1 0 0" size="0.006" rgba="0 0.8 0 1"/>
+      <site name="tool_tip" size="0.003" rgba="1 0 1 1"/>
+    </body>
+  </worldbody>
+
+  <equality>
+    <weld name="weld_L" body1="left_hand" body2="workpiece" anchor="0.10 0 0.005" solref="0.004 1"
+      solimp="0.95 0.99 0.001 0.5 2"/>
+    <weld name="weld_tool" body1="right_hand" body2="tool" anchor="0 0 0.09" solref="0.004 1"
+      solimp="0.95 0.99 0.001 0.5 2"/>
+    <!-- 工具尖端直接 weld 到工件（螺钉头顶面处） -->
+    <weld name="weld_bit" body1="tool" body2="workpiece" anchor="-0.10 0 0.0205" solref="0.004 1"
+      solimp="0.95 0.99 0.001 0.5 2"/>
+  </equality>
+
+  <contact>
+    <exclude body1="left_hand" body2="workpiece"/>
+    <exclude body1="left_left_finger" body2="workpiece"/>
+    <exclude body1="left_right_finger" body2="workpiece"/>
+    <exclude body1="left_link7" body2="workpiece"/>
+    <exclude body1="right_hand" body2="tool"/>
+    <exclude body1="right_left_finger" body2="tool"/>
+    <exclude body1="right_right_finger" body2="tool"/>
+    <exclude body1="right_link7" body2="tool"/>
+    <exclude body1="tool" body2="workpiece"/>
+  </contact>
+  <keyframe>
+    <key name="init" qpos="0.86664 0.632304 -1.14559 -2.24631 0.845706 2.33875 1.23689 -0.244396 0.0653885 0.534145 -2.25418 -0.0450285 2.30997 1.5708 0 -0.45 0.875 1 0 0 0 -0.1 -0.45 0.8955 -0.631261 2.84616e-14 -3.70898e-14 0.77557"/>
+  </keyframe>
+</mujoco>

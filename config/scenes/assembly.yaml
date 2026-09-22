@@ -1,0 +1,63 @@
+# 场景 2：左手固定工件 + 右手旋拧螺钉（非对称协作）—— SceneSpec
+name: assembly
+description: 左臂持握工件（持握臂），右臂用套筒拧螺钉（作业臂）；闭链中含 1 个螺旋副，相对自由度 1
+model: models/scene_assembly.xml
+
+object:
+  body: workpiece
+  geom: workpiece_geom
+
+grasps:
+  left:  {site: grasp_L, weld: weld_L, finger_opening: 0.026}     # 夹工件（宽 0.05 m）
+  right: {site: grasp_R, weld: weld_tool, finger_opening: 0.007}  # 夹工具杆（直径 0.012 m）
+
+# 闭链：左臂 → 工件 → 螺钉 → 工具 → 右臂。两臂之间的总相对自由度 = Σ relative_dof = 1 → 内力空间维数 5。
+constraints:
+  - {name: weld_L, type: rigid, body1: left_hand, body2: workpiece, relative_dof: 0}
+  - name: screw_joint
+    type: screw
+    body1: workpiece           # 螺纹孔所在 body
+    body2: screw
+    relative_dof: 1
+    lead: 0.00125              # [m/rev] M8 粗牙
+    axis: [0.0, 0.0, 1.0]      # 螺纹轴（body1 坐标系）
+    point: [-0.10, 0.0, 0.015] # 轴上一点（body1 坐标系）：孔口中心
+    hinge: screw_hinge
+    slide: screw_slide
+    coupling: screw_lead       # slide = lead/(2π) · hinge 的 equality
+  - {name: weld_bit, type: rigid, body1: tool, body2: screw, relative_dof: 0}
+  - {name: weld_tool, type: rigid, body1: right_hand, body2: tool, relative_dof: 0}
+
+# 螺钉动力学参数（覆盖 XML 中的 hinge 阻尼 / 摩擦；贴合阻力矩由 SimEnv 施加在 hinge 上）
+screw:
+  damping: 0.02              # [N·m·s/rad] hinge 粘性阻尼
+  frictionloss: 0.05         # [N·m] hinge 库仑摩擦（MuJoCo frictionloss）
+  seat_depth: 0.0005         # [m] 拧入这么深后螺钉头贴合座面（XML 中的初始间隙；转 144° 贴合）
+  seat_stiffness: 20000.0    # [N·m/m] 贴合后的阻力矩 = seat_stiffness · (拧入深度 − seat_depth)
+  seat_torque_max: 8.0       # [N·m] 阻力矩上限
+
+obstacles:
+  pairs:
+    - [left_arm, right_arm]
+    - [left_arm, table_top]
+    - [right_arm, table_top]
+    - [left_arm, fixture]
+    - [right_arm, fixture]
+    - [right_arm, workpiece]
+    - [left_arm, tool]
+
+# 工件保持不动；右臂按螺钉转角 screw_angle_deg 旋拧（负 = 从上往下看顺时针 = 拧紧）。
+# 只靠 joint7 转动（行程 332°），一次最多拧约 180°；更多圈数需要重新夹持（不在本场景范围内）。
+waypoints:
+  - {name: start,  pos: [0.0, -0.45, 0.875], rpy_deg: [0, 0, 0], screw_angle_deg: 0}
+  - {name: half,   pos: [0.0, -0.45, 0.875], rpy_deg: [0, 0, 0], screw_angle_deg: -90}
+  - {name: seated, pos: [0.0, -0.45, 0.875], rpy_deg: [0, 0, 0], screw_angle_deg: -180}
+
+cameras: [cam_iso, cam_front]
+
+q_init:
+  left:  [0.866640, 0.632304, -1.145585, -2.246313, 0.845706, 2.338751, 1.236894]
+  right: [-0.244772, 0.065403, 0.534525, -2.254175, -0.045067, 2.309970, -1.570796]
+
+overrides:
+  disturbances: []           # 本场景的“扰动”来自螺钉，不再额外施加外力

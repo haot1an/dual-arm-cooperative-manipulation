@@ -1,0 +1,18 @@
+# build outputs
+build/
+build-*/
+cmake-build-*/
+compile_commands.json
+
+# run outputs
+logs/
+
+# python
+__pycache__/
+*.pyc
+
+# editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

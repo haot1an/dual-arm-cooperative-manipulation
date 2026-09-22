@@ -1,0 +1,50 @@
+# 场景 0：长杆抬起与放置（控制器验证用）—— SceneSpec
+# 由 C++ 的 loadSceneSpec() 与 tools/*.py 共同读取。质量 / 惯量 / 尺寸从编译后的模型读取，这里只写名字。
+name: lift
+description: 长杆抬起与放置（对称协作，刚性抓取，相对自由度 0）
+model: models/scene_lift.xml
+
+# 被操作物体（主物体）：必须是带 free joint 的 body
+object:
+  body: rod
+  geom: rod_geom
+
+# 两臂的抓取：site = 抓取点（TCP 目标，位于被抓 body 上）；weld = 夹爪 ↔ 被抓 body 的 equality 名；
+# finger_opening = 手指固定开度（每指，m）= 被夹宽度/2 + 1 mm
+grasps:
+  left:  {site: grasp_L, weld: weld_L, finger_opening: 0.031}
+  right: {site: grasp_R, weld: weld_R, finger_opening: 0.031}
+
+# 闭链约束列表：左臂 → 物体 → 右臂。relative_dof = 该约束允许的相对自由度数。
+# 两臂之间的总相对自由度 = Σ relative_dof = 0 → 内力空间维数 6。
+constraints:
+  - {name: weld_L, type: rigid, body1: left_hand, body2: rod, relative_dof: 0}
+  - {name: weld_R, type: rigid, body1: right_hand, body2: rod, relative_dof: 0}
+
+# 避障检查的 geom 对。名字可以是：left_arm / right_arm（该臂除 link0 外的全部碰撞体）、object（主物体）、
+# body 名（该 body 的全部碰撞体）或 geom 名。
+obstacles:
+  pairs:
+    - [left_arm, right_arm]
+    - [left_arm, table_top]
+    - [right_arm, table_top]
+    - [left_arm, target_step]
+    - [right_arm, target_step]
+    - [object, target_step]
+
+# 任务航点：物体中心在世界系下的位姿序列（rpy 为 R = Rz Ry Rx，度）
+waypoints:
+  - {name: grasp,        pos: [0.0, -0.45, 0.781], rpy_deg: [0, 0, 0]}
+  - {name: lifted,       pos: [0.0, -0.45, 0.980], rpy_deg: [0, 0, 0]}
+  - {name: above_target, pos: [0.0, -0.66, 1.000], rpy_deg: [0, 0, 0]}
+  - {name: placed,       pos: [0.0, -0.66, 0.931], rpy_deg: [0, 0, 0]}
+
+cameras: [cam_iso, cam_front]
+
+# 初始关节角（抓取位姿，由 tools/calibrate_base.py 按最终布局求解后写入）
+q_init:
+  left:  [-1.083396, 0.686528, 0.932824, -2.388236, -1.108453, 2.536413, -0.298058]
+  right: [-1.067247, 0.688481, 0.934906, -2.387947, -1.110785, 2.534500, 0.245067]
+
+# 场景对公共配置的覆盖（合并进 default.yaml）
+overrides: {}

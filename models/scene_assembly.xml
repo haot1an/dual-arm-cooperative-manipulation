@@ -1,0 +1,95 @@
+<!--
+  scene_assembly.xml —— 场景 2：左手固定工件 + 右手旋拧螺钉（非对称协作，相对自由度 1）
+  =====================================================================================
+  工件（带螺纹孔的支架）0.26 × 0.05 × 0.03 m、0.7 kg，悬在工装上方 1 cm：只由左臂持握，
+  旋拧的反作用力矩全部由左臂承担（不会被工装的摩擦“帮忙”）。
+  螺钉 M8（导程 1.25 mm）是工件的子 body：hinge（绕孔轴 +z）+ slide（沿 +z）两个关节，
+  用 <equality joint> 按导程耦合：slide = (lead / 2π) · hinge。右旋螺纹：从上往下看顺时针（hinge 为负）拧紧，
+  螺钉向下进给（slide 为负）。初始时螺钉头底面离座面 0.5 mm（config 中 seat_depth），再拧 144° 贴合座面，
+  之后由 SimEnv 按拧入深度施加随深度增大的阻力矩（模拟座面贴合）。
+  右臂夹持一个套筒工具（独立 body，weld 到右手），工具尖端 weld 到螺钉头。
+  闭链：右臂 → 工具 → 螺钉 →（螺旋副，1 自由度）→ 工件 → 左臂。
+-->
+<mujoco model="scene_assembly">
+  <include file="workcell.xml"/>
+
+  <worldbody>
+    <camera name="cam_iso" pos="0.75 0.55 1.75" xyaxes="-0.8000 0.6000 0.0000 -0.3374 -0.4498 0.8269"/>
+    <camera name="cam_front" pos="0.35 -1.35 1.45" xyaxes="0.9249 0.3802 0.0000 -0.1871 0.4551 0.8706"/>
+
+    <!-- 工装：顶面 z = 0.85。左手抓取点与螺纹孔相距 0.20 m（右手外壳绕工具轴转动时不碰左臂腕部） -->
+    <body name="fixture" pos="0 -0.45 0.80">
+      <geom name="fixture" class="prop" size="0.15 0.06 0.05" material="prop_grey"/>
+    </body>
+
+    <!-- 工件：底面在工装上方 1 cm -->
+    <body name="workpiece" pos="0 -0.45 0.875">
+      <freejoint name="workpiece_joint"/>
+      <geom name="workpiece_geom" type="box" size="0.13 0.025 0.015" mass="0.7" material="metal"/>
+      <!-- 螺纹孔所在的凸台（仅视觉） -->
+      <geom name="workpiece_boss" type="cylinder" size="0.012 0.0152" pos="-0.10 0 0" material="prop_dark"
+        contype="0" conaffinity="0" mass="0"/>
+      <!-- 左手抓取点：顶面下 1 cm；z 竖直向下，y 为手指开合方向 -->
+      <site name="grasp_L" pos="0.10 0 0.005" quat="0 0 -1 0" size="0.008" rgba="0 0.8 0 1"/>
+      <!-- 螺纹孔口（孔轴 = 工件 +z） -->
+      <site name="hole" pos="-0.10 0 0.015" size="0.004" rgba="1 0.8 0 1"/>
+
+      <!-- 螺钉：body 原点在螺钉头底面中心（初始离孔口 0.5 mm） -->
+      <body name="screw" pos="-0.10 0 0.0155">
+        <!-- armature 不是物理量，而是为了让螺纹耦合约束足够“硬”：MuJoCo 按两个关节的常数逆惯量
+             dof_invweight0 之和设置 joint 等式约束的正则化（软度）。螺钉只有 8 g、绕轴惯量 ~1e-7 kg·m²，
+             不加 armature 时耦合误差在 2.6 N 轴向载荷下达 0.9 mm（接近导程）；加上后约 0.01 mm。
+             0.01 kg·m² 相对右臂 joint7 自身的 armature 0.1 kg·m² 很小。阻尼 / 摩擦由 config 的 screw 段覆盖。 -->
+        <joint name="screw_hinge" type="hinge" axis="0 0 1" damping="0.02" frictionloss="0.05" armature="0.01"/>
+        <joint name="screw_slide" type="slide" axis="0 0 1" damping="1.0" armature="1" range="-0.004 0.002"/>
+        <geom name="screw_head" type="cylinder" size="0.0065 0.0025" pos="0 0 0.0025" material="prop_dark" mass="0.004"/>
+        <geom name="screw_shank" type="cylinder" size="0.004 0.010" pos="0 0 -0.010" material="metal" mass="0.004"
+          contype="0" conaffinity="0"/>
+        <geom name="screw_mark" type="box" size="0.006 0.0008 0.0004" pos="0 0 0.0052" rgba="0.9 0.9 0.2 1"
+          contype="0" conaffinity="0" mass="0"/>
+        <site name="screw_head_top" pos="0 0 0.005" size="0.003" rgba="1 0 1 1"/>
+      </body>
+    </body>
+
+    <!-- 套筒工具：body 原点在工具尖端，+z 沿工具轴向上；右手在 z = 0.09 处夹持 -->
+    <body name="tool" pos="-0.10 -0.45 0.8955">
+      <freejoint name="tool_joint"/>
+      <geom name="tool_socket" type="cylinder" size="0.009 0.010" pos="0 0 0.010" material="prop_dark" mass="0.03"/>
+      <geom name="tool_shaft" type="cylinder" size="0.006 0.060" pos="0 0 0.060" material="metal" mass="0.08"/>
+      <geom name="tool_mark" type="box" size="0.0095 0.0015 0.004" pos="0 0 0.016" rgba="0.9 0.9 0.2 1"
+        contype="0" conaffinity="0" mass="0"/>
+      <!-- 右手抓取点：z 指向工具尖端（竖直向下），y 为手指开合方向 -->
+      <site name="grasp_R" pos="0 0 0.09" quat="0 1 0 0" size="0.006" rgba="0 0.8 0 1"/>
+      <site name="tool_tip" size="0.003" rgba="1 0 1 1"/>
+    </body>
+  </worldbody>
+
+  <equality>
+    <weld name="weld_L" body1="left_hand" body2="workpiece" anchor="0.10 0 0.005" solref="0.004 1"
+      solimp="0.95 0.99 0.001 0.5 2"/>
+    <weld name="weld_tool" body1="right_hand" body2="tool" anchor="0 0 0.09" solref="0.004 1"
+      solimp="0.95 0.99 0.001 0.5 2"/>
+    <weld name="weld_bit" body1="tool" body2="screw" anchor="0 0 0.005" solref="0.004 1"
+      solimp="0.95 0.99 0.001 0.5 2"/>
+    <!-- 螺旋副：slide = 0.000198944 · hinge（1.25 mm / 2π）。solimp 比 weld 更硬（误差 0.1 mm 时阻抗已达 0.999） -->
+    <joint name="screw_lead" joint1="screw_slide" joint2="screw_hinge" polycoef="0 0.000198944 0 0 0"
+      solref="0.002 1" solimp="0.99 0.999 0.0001 0.5 2"/>
+  </equality>
+
+  <contact>
+    <exclude body1="left_hand" body2="workpiece"/>
+    <exclude body1="left_left_finger" body2="workpiece"/>
+    <exclude body1="left_right_finger" body2="workpiece"/>
+    <exclude body1="left_link7" body2="workpiece"/>
+    <exclude body1="right_hand" body2="tool"/>
+    <exclude body1="right_left_finger" body2="tool"/>
+    <exclude body1="right_right_finger" body2="tool"/>
+    <exclude body1="right_link7" body2="tool"/>
+    <exclude body1="tool" body2="screw"/>
+    <exclude body1="tool" body2="workpiece"/>
+    <exclude body1="workpiece" body2="screw"/>
+  </contact>
+  <keyframe>
+    <key name="init" qpos="0.86664 0.632304 -1.14559 -2.24631 0.845706 2.33875 1.23689 -0.244772 0.0654032 0.534525 -2.25418 -0.0450675 2.30997 -1.5708 0 -0.45 0.875 1 0 0 0 0 0 -0.1 -0.45 0.8955 0.775562 3.71979e-14 5.76475e-14 0.631272"/>
+  </keyframe>
+</mujoco>

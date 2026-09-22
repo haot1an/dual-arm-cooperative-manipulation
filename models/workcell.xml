@@ -1,0 +1,83 @@
+<!--
+  workcell.xml —— 三个场景共用的工作单元：地面、灯光、工作台、两台带夹爪的 Panda（同侧并排）。
+  由 scene_*.xml 通过 <include file="workcell.xml"/> 引入，不能单独加载。
+
+  世界系 W：原点在地面、两基座连线中点的正下方；x 沿两臂连线（左臂在 +x），y 指向操作者一侧，z 向上。
+  两台 Panda 装在台面（z = 0.75）上靠近操作者的一侧（y = 0），沿 x 左右分开，基座各自向内偏转；
+  机器人朝 −y 方向工作，物体放在两臂前方（−y）的台面上。
+  “左 / 右”以机器人自身朝向（面向 −y）为准：左臂在 +x，右臂在 −x。
+
+  注意：C++ 端（SimEnv / MujocoRobotModel）与 tools/*.py 都以 config/default.yaml 的 layout 为准，
+  会在编译前覆盖 left_base / right_base 的位姿，并按场景配置设置手指开度；这里的数值与 config 保持一致，
+  只为了用 MuJoCo 自带 simulate 直接打开场景时也正确。
+-->
+<mujoco model="dual_panda_workcell">
+  <compiler angle="radian" autolimits="true"/>
+
+  <!-- 1 kHz 仿真/控制；implicitfast 对关节阻尼隐式积分；jacobian=dense 使 efc_J 为稠密矩阵 -->
+  <option timestep="0.001" integrator="implicitfast" gravity="0 0 -9.81" impratio="10" jacobian="dense"/>
+
+  <statistic center="0 -0.35 0.95" extent="1.6"/>
+
+  <visual>
+    <headlight diffuse="0.55 0.55 0.55" ambient="0.35 0.35 0.35" specular="0 0 0"/>
+    <rgba haze="0.93 0.93 0.93 1"/>
+    <global azimuth="-60" elevation="-25" offwidth="1600" offheight="1200"/>
+    <quality shadowsize="4096"/>
+    <scale forcewidth="0.02" contactwidth="0.05" contactheight="0.02" framelength="0.12" framewidth="0.006"/>
+  </visual>
+
+  <default>
+    <!-- 场景中的静态道具（托架、槽框、障碍柱、工装）：参与碰撞 -->
+    <default class="prop">
+      <geom type="box" contype="1" conaffinity="1" friction="0.8 0.02 0.001"/>
+    </default>
+  </default>
+
+  <asset>
+    <model name="panda" file="panda_hand_torque.xml"/>
+
+    <texture type="skybox" builtin="gradient" rgb1="0.97 0.97 0.97" rgb2="0.80 0.82 0.85" width="512" height="3072"/>
+    <!-- 素色地板 + 淡网格（0.25 m 一格） -->
+    <texture type="2d" name="floor_grid" builtin="flat" mark="edge" rgb1="0.90 0.90 0.89" markrgb="0.80 0.80 0.79"
+      width="512" height="512"/>
+    <material name="floor" texture="floor_grid" texuniform="true" texrepeat="4 4" reflectance="0.05"/>
+    <material name="table_top" rgba="0.72 0.64 0.52 1" specular="0.1"/>
+    <material name="table_leg" rgba="0.35 0.35 0.37 1"/>
+    <material name="prop_grey" rgba="0.55 0.57 0.60 1" specular="0.2"/>
+    <material name="prop_dark" rgba="0.30 0.32 0.35 1" specular="0.2"/>
+    <material name="prop_blue" rgba="0.25 0.45 0.70 1" specular="0.2"/>
+    <material name="obstacle" rgba="0.80 0.30 0.25 1" specular="0.2"/>
+    <material name="wood" rgba="0.78 0.58 0.34 1" specular="0.05"/>
+    <material name="metal" rgba="0.70 0.72 0.75 1" specular="0.6" shininess="0.6"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 -0.4 3.2" dir="0 0.1 -1" directional="true" diffuse="0.55 0.55 0.55" castshadow="true"/>
+    <light pos="2 -2 2.5" dir="-1 1 -1" directional="true" diffuse="0.2 0.2 0.2" castshadow="false"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="floor"/>
+
+    <!-- 工作台：台面 1.7 × 1.3 m，顶面高 0.75 m（放在 0.7499，避开 link0 网格底面 0.03 mm 的重叠）。
+         台面参与碰撞（物体可以放在台面 / 道具上；机械臂碰到台面会产生接触）。 -->
+    <body name="table">
+      <geom name="table_top" type="box" size="0.85 0.65 0.02" pos="0 -0.35 0.7299" material="table_top"
+        contype="1" conaffinity="1" friction="0.8 0.02 0.001"/>
+      <geom name="table_leg1" type="box" size="0.025 0.025 0.355" pos="0.80 0.25 0.355" material="table_leg"
+        contype="0" conaffinity="0"/>
+      <geom name="table_leg2" type="box" size="0.025 0.025 0.355" pos="-0.80 0.25 0.355" material="table_leg"
+        contype="0" conaffinity="0"/>
+      <geom name="table_leg3" type="box" size="0.025 0.025 0.355" pos="0.80 -0.95 0.355" material="table_leg"
+        contype="0" conaffinity="0"/>
+      <geom name="table_leg4" type="box" size="0.025 0.025 0.355" pos="-0.80 -0.95 0.355" material="table_leg"
+        contype="0" conaffinity="0"/>
+    </body>
+
+    <!-- 基座安装 body（位姿由 config/default.yaml 的 layout 覆盖；这里是标定后的名义值） -->
+    <body name="left_base" pos="0.3750 0.0000 0.7500" euler="0 0 -1.832596">
+      <attach model="panda" body="link0" prefix="left_"/>
+    </body>
+    <body name="right_base" pos="-0.3750 0.0000 0.7500" euler="0 0 -1.308997">
+      <attach model="panda" body="link0" prefix="right_"/>
+    </body>
+  </worldbody>
+</mujoco>

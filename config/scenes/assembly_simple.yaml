@@ -1,0 +1,50 @@
+# 场景 2 退化版：工具直接 weld 到工件（相对自由度 0），用可配置的绕轴力矩剖面模拟旋拧反作用力矩
+name: assembly_simple
+description: 左臂持握工件，右臂工具刚性连在工件上；对工件施加绕孔轴的力矩剖面（先跑通“左臂抑制反作用力矩”）
+model: models/scene_assembly_simple.xml
+
+object:
+  body: workpiece
+  geom: workpiece_geom
+
+grasps:
+  left:  {site: grasp_L, weld: weld_L, finger_opening: 0.026}
+  right: {site: grasp_R, weld: weld_tool, finger_opening: 0.007}
+
+# 闭链：左臂 → 工件 → 工具 → 右臂，全部刚性：相对自由度 0 → 内力空间维数 6
+constraints:
+  - {name: weld_L, type: rigid, body1: left_hand, body2: workpiece, relative_dof: 0}
+  - {name: weld_bit, type: rigid, body1: tool, body2: workpiece, relative_dof: 0}
+  - {name: weld_tool, type: rigid, body1: right_hand, body2: tool, relative_dof: 0}
+
+obstacles:
+  pairs:
+    - [left_arm, right_arm]
+    - [left_arm, table_top]
+    - [right_arm, table_top]
+    - [left_arm, fixture]
+    - [right_arm, fixture]
+    - [right_arm, workpiece]
+    - [left_arm, tool]
+
+waypoints:
+  - {name: start, pos: [0.0, -0.45, 0.875], rpy_deg: [0, 0, 0], screw_angle_deg: 0}
+
+cameras: [cam_iso, cam_front]
+
+q_init:
+  left:  [0.866640, 0.632304, -1.145585, -2.246313, 0.845706, 2.338751, 1.236894]
+  right: [-0.244396, 0.065389, 0.534145, -2.254176, -0.045029, 2.309972, 1.570796]
+
+overrides:
+  # 绕孔轴（世界 z，工件水平放置时即孔轴）的力矩剖面，作用在工件上：模拟拧紧时螺钉给工件的反作用。
+  # 拧紧（从上往下看顺时针）时，螺钉对工件的反作用力矩沿 −z。
+  disturbances:
+    - enabled: true
+      body: workpiece
+      frame: world
+      t_start: 1.0
+      t_end: 5.0
+      ramp: 1.0
+      force: [0.0, 0.0, 0.0]
+      torque: [0.0, 0.0, -3.0]   # [N·m]

@@ -1,0 +1,54 @@
+<!--
+  scene_lift.xml —— 场景 0：长杆抬起与放置（控制器验证用）
+  =========================================================
+  长杆 0.70 × 0.06 × 0.06 m、1.5 kg，平放在台面上（底面离台面 1 mm），长轴沿 x。
+  两臂自上方接近，在杆上 x = ±0.25 m 处（grasp_L / grasp_R）夹住杆的 ±y 侧面，
+  hand 与杆之间用 weld 刚性连接（相对自由度 = 0）。
+  任务：抓取位姿 → 竖直抬起 → 平移到前上方的台阶 → 放下（航点见 config/scenes/lift.yaml）。
+  目标台阶顶面高 0.90 m，比台面高 0.15 m、比起始位置靠前 0.21 m。
+-->
+<mujoco model="scene_lift">
+  <include file="workcell.xml"/>
+
+  <worldbody>
+    <!-- 固定相机（都对准 (0, −0.5, 0.9)）：cam_iso 等轴测；cam_front 从物体前方（−y）正视两臂 -->
+    <camera name="cam_iso" pos="0.95 1.15 2.3" xyaxes="-0.8666 0.4990 0.0000 -0.3023 -0.5251 0.7956"/>
+    <camera name="cam_front" pos="0.45 -2.05 2.05" xyaxes="0.9603 0.2788 0.0000 -0.1664 0.5730 0.8025"/>
+
+    <!-- 目标台阶：顶面 z = 0.90 -->
+    <body name="target_step" pos="0 -0.66 0.825">
+      <geom name="target_step" class="prop" size="0.42 0.09 0.075" material="prop_blue"/>
+    </body>
+
+    <body name="rod" pos="0 -0.45 0.781">
+      <freejoint name="rod_joint"/>
+      <geom name="rod_geom" type="box" size="0.35 0.03 0.03" mass="1.5" material="wood"
+        friction="0.8 0.02 0.001"/>
+      <!-- 抓取点（TCP 目标）：顶面下 2 cm；z 竖直向下，y 为手指开合方向 -->
+      <site name="grasp_L" pos="0.25 0 0.01" quat="0 1 0 0" size="0.008" rgba="0 0.8 0 1"/>
+      <site name="grasp_R" pos="-0.25 0 0.01" quat="0 1 0 0" size="0.008" rgba="0 0.8 0 1"/>
+      <site name="rod_center" size="0.008" rgba="0 0 1 1"/>
+    </body>
+  </worldbody>
+
+  <equality>
+    <weld name="weld_L" body1="left_hand" body2="rod" anchor="0.25 0 0.01" solref="0.004 1"
+      solimp="0.95 0.99 0.001 0.5 2"/>
+    <weld name="weld_R" body1="right_hand" body2="rod" anchor="-0.25 0 0.01" solref="0.004 1"
+      solimp="0.95 0.99 0.001 0.5 2"/>
+  </equality>
+
+  <contact>
+    <exclude body1="left_hand" body2="rod"/>
+    <exclude body1="left_left_finger" body2="rod"/>
+    <exclude body1="left_right_finger" body2="rod"/>
+    <exclude body1="left_link7" body2="rod"/>
+    <exclude body1="right_hand" body2="rod"/>
+    <exclude body1="right_left_finger" body2="rod"/>
+    <exclude body1="right_right_finger" body2="rod"/>
+    <exclude body1="right_link7" body2="rod"/>
+  </contact>
+  <keyframe>
+    <key name="init" qpos="-1.0834 0.686528 0.932824 -2.38824 -1.10845 2.53641 -0.298058 -1.06725 0.688481 0.934906 -2.38795 -1.11079 2.5345 0.245067 0 -0.45 0.781 1 0 0 0"/>
+  </keyframe>
+</mujoco>
