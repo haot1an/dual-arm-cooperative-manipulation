@@ -1,4 +1,5 @@
-// 【桩 / 由你实现】实现步骤见 include/dual_arm/coop_controller.hpp 与 docs/cooperative_control.md §6。
+// 控制结构与公式见 include/dual_arm/coop_controller.hpp 和
+// docs/cooperative_control.md §6。
 #include "dual_arm/coop_controller.hpp"
 
 #include "dual_arm/coop_kinematics.hpp"

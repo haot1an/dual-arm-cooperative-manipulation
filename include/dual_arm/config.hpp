@@ -137,7 +137,7 @@ namespace dual_arm
     double load_share_left = 0.5;
   };
 
-  /// 对称协同控制器参数占位：字段含义由你在 CoopController 中定义。
+  /// 对称协同控制器参数。
   struct CoopConfig
   {
     Vector6d object_stiffness =

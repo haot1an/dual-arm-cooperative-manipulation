@@ -1,12 +1,10 @@
 #pragma once
 /**
  * @file coop_kinematics.hpp
- * @brief 【桩 / 由你实现】协同运动学与静力学。
+ * @brief 双臂协同运动学与静力学。
  *
- * 这里只给出函数签名、维度、坐标约定和“应该算什么”，公式编号对应
- * docs/cooperative_control.md。所有桩函数目前返回 NaN 填充的结果（并在第一次调用时
- * 打印一次提示），这样没实现的量在日志/测试里一眼就能看出来；
- * tests/test_coop_template.cpp 中的测试在检测到 NaN 时会自动 SKIP，实现后自动生效。
+ * 函数的维度、坐标约定与公式编号对应 docs/cooperative_control.md。
+ * tests/test_coop_template.cpp 验证抓取矩阵、内力零空间、负载分配和理想闭链关系。
  *
  * 统一约定（与 types.hpp 一致）：
  *  - 所有向量/矩阵都在**世界系 W** 下表达；

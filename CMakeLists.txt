@@ -16,8 +16,8 @@ endif()
 
 option(DUAL_ARM_BUILD_TESTS     "Build GTest unit tests"                         ON)
 option(DUAL_ARM_BUILD_VIEWER    "Build GLFW viewer (needs glfw3)"                 ON)
-option(DUAL_ARM_WITH_OSQP       "Find OsqpEigen for future torque-level QP"       OFF)
-option(DUAL_ARM_WITH_PINOCCHIO  "Find Pinocchio for a future RobotModel backend"  OFF)
+option(DUAL_ARM_WITH_OSQP       "Build the optional OsqpEigen compatibility test"  OFF)
+option(DUAL_ARM_WITH_PINOCCHIO  "Enable an optional Pinocchio RobotModel backend"  OFF)
 option(DUAL_ARM_WERROR          "Treat warnings as errors"                        OFF)
 
 # ----------------------------------------------------------------------------

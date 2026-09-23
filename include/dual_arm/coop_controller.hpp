@@ -1,7 +1,7 @@
 #pragma once
 /**
  * @file coop_controller.hpp
- * @brief 【桩 / 由你实现】力矩级对称双臂协同控制器——闭链“相对自由度 0”的特例。
+ * @brief 对称双臂协同控制器——闭链“相对自由度 0”的特例。
  *
  * 适用场景：两只手都刚性抓住同一个物体（lift、slot：两个 rigid 约束，
  * scene().relativeDofBetweenHands() == 0）。此时两手之间没有任何允许的相对运动：
@@ -10,10 +10,7 @@
  * 若场景的相对自由度 n_r > 0（例如装配：螺旋副 n_r = 1），应使用 AsymmetricCoopController，
  * 或把本控制器推广为“相对子空间 S 内允许运动、只在 S 的补空间里调节内力”（见 docs/cooperative_control.md §10）。
  *
- * 目前 compute() 只返回两臂的重力补偿 g_i(q)，保证整个框架能编译运行
- * （因此物体重量会把两臂拉下来——这是预期行为，不是 bug）。
- *
- * 建议的实现步骤（公式编号见 docs/cooperative_control.md §6）：
+ * 控制链路（公式编号见 docs/cooperative_control.md §6）：
  *   0) model_->update(state)；取 J_i, J̇_i dq_i, M_i, h_i, g_i, 名义末端位姿 T_i
  *   1) 物体状态：由名义抓取几何 T_o = T_1 · T_{o,g_1}^{-1}（T_{o,g_i} = scene().grasp[i].site_in_body）
  *      或两臂平均 / 用 state.object 得到 p_o, R_o；r_i = p_o − p_i；ν_o 由 J_a dq 得到     (3.6)
@@ -24,7 +21,7 @@
  *      或“相对空间柔顺”：h_r,cmd = K_r e_r + D_r ė_r                                      (6.5)
  *   5) 分配：h = G_W^+ w_o + V h_r,cmd                                                    (4.3/4.9)
  *   6) 力矩映射：τ_i = J_iᵀ h_i + h_i(q,dq) + N_i τ_0,i                                    (6.1)
- *   7) （之后）把 5–6 换成力矩级 QP，统一处理闭链约束、关节/力矩限位、防碰撞
+ *   7) QpCoopController 在名义力矩之上统一处理闭链约束、关节/力矩限位、防碰撞
  *      （CollisionModel 提供 d、∂d/∂q；进入 QP 的方式见 collision_model.hpp）             (6.6)
  *   8) 把需要看的中间量（期望内力、物体误差……）写进成员变量，方便调试/日志扩展
  */
@@ -55,9 +52,6 @@ namespace dual_arm
   private:
     std::shared_ptr<const ObjectTrajectory> trajectory_;
     CoopConfig params_;
-
-    // TODO: 在这里预分配控制器需要的定长中间量，例如
-    //   Matrix6x12d G_; Matrix12d W_; Vector12d h_cmd_; Wrench w_o_cmd_; Vector6d h_r_meas_; ...
 
     /// 根据当前物体位姿构造 G = [G_left, G_right]。
     Matrix6x12d makeGraspMatrix(

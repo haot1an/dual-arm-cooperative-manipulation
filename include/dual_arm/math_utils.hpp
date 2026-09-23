@@ -45,7 +45,7 @@ struct JacobianMetrics {
 };
 JacobianMetrics jacobianMetrics(const Matrix6x7d& J);
 
-/// 用于把 NaN 填充的“未实现”结果与正常结果区分开
+/// 检查数值结果中是否包含 NaN。
 template <typename Derived>
 bool hasNaN(const Eigen::MatrixBase<Derived>& m) {
   return !(m.array() == m.array()).all();

@@ -1,7 +1,7 @@
 // 重力补偿与基线控制器（lift 场景）：
 //  1) 不夹物体（weld 关闭、物体移到远处地面上）时，纯重力补偿 τ = g(q) 下机械臂基本静止；
 //  2) 夹着物体时，GravityCompJointPD 能持住物体（不掉落、不发散）；
-//  3) 协同控制器桩（对称 / 非对称）能运行（输出 = 重力补偿）。
+//  3) 对称 / 非对称协同控制器能稳定运行并完成对应任务。
 #include "dual_arm/asym_coop_controller.hpp"
 #include "dual_arm/baseline_controllers.hpp"
 #include "dual_arm/coop_controller.hpp"

@@ -1,5 +1,5 @@
 // 仅在 -DDUAL_ARM_WITH_OSQP=ON 时编译：确认 OsqpEigen 能链接并求解一个小 QP，
-// 为以后的力矩级 QP 做准备。
+// 可选 OsqpEigen 依赖的链接与基本求解兼容性测试。
 //   min ½ xᵀ H x + gᵀ x,  s.t. l ≤ A x ≤ u
 #include <OsqpEigen/OsqpEigen.h>
 #include <gtest/gtest.h>

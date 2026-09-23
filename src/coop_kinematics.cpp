@@ -1,5 +1,5 @@
-// 【桩 / 由你实现】每个函数的“应该算什么”见 include/dual_arm/coop_kinematics.hpp
-// 与 docs/cooperative_control.md。实现一个就删掉对应的 warnNotImplemented + NaN 返回。
+// 公式与坐标约定见 include/dual_arm/coop_kinematics.hpp
+// 和 docs/cooperative_control.md。
 #include "dual_arm/coop_kinematics.hpp"
 
 #include "dual_arm/math_utils.hpp"

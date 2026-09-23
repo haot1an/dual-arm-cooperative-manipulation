@@ -15,7 +15,7 @@
  *   ref_{x,y,z,qw,qx,qy,qz}, ref_screw                物体参考位姿、螺钉转角参考 [rad]
  *   dist_{fx,fy,fz,mx,my,mz}                          施加在主物体质心的扰动（世界系）
  *   obj_err_{x,y,z,rx,ry,rz}                          物体位姿误差 [p_ref − p; log(R_ref Rᵀ)]（世界系）
- *   int_{l,r}_{fx,...,mz}                             【预留】内力 h_int（由 coop::internalWrenchForLogging 填入，未实现时为 NaN）
+ *   int_{l,r}_{fx,...,mz}                             内力 h_int（由 coop::internalWrenchForLogging 填入）
  *   assembly_phase                                    装配状态机：0 preload, 1 angle, 2 torque, 3 hold
  *   tightening_tau_{ref,meas}                         拧紧力矩参考 / 滤波测量 [N·m]（正值为拧紧）
  *   preload_{ref,meas}                                轴向预紧力参考 / 滤波测量 [N]（正值为压紧）
