@@ -12,6 +12,7 @@ dual_arm_ws/
 ├── include/dual_arm/             公共接口与定长数据类型
 ├── src/                          控制器、QP、碰撞、轨迹、日志和 MuJoCo 后端
 ├── models/                       双 Panda 工作站、任务物体和第三方 mesh
+├── learning/                     从公式推导到手写代码的项目学习手册
 ├── tests/                        单元、集成、几何与零分配测试
 ├── scripts/plot_log.py           CSV 对比绘图
 ├── scripts/run_portfolio_demo.sh 一键 A/B 作品集实验

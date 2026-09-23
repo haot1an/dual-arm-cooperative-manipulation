@@ -305,6 +305,7 @@ tools/                标定、场景设计辅助工具
 
 进一步阅读：
 
+- [项目学习手册：从公式到手写代码](learning/README.md)
 - [协同控制原理](docs/cooperative_control.md)
 - [第二阶段实验报告](docs/experiment_results.md)
 - [项目面试问题与回答主线](docs/interview_questions.md)
