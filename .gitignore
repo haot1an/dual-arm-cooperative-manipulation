@@ -6,6 +6,7 @@ compile_commands.json
 
 # run outputs
 logs/
+artifacts/
 
 # python
 __pycache__/

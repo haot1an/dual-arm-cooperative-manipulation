@@ -13,7 +13,8 @@
     weld_wrench.png      weld 约束 wrench（仿真真值，世界系，抓取点）
     box.png              物体位移 / 相对参考轨迹的位姿误差（灰色阴影 = 施加扰动的时间段）
     timing.png           单周期控制器计算耗时
-    internal_force.png   【预留】内力 h_int（int_* 列，由 coop::internalWrenchForLogging 填入）
+    internal_force.png   内力 h_int（int_* 列）
+    governor.png         reference governor 阶段、偏移与障碍距离
 
 只依赖 numpy + matplotlib。
 """
@@ -265,10 +266,9 @@ def plot_timing(plt, runs: list[Run], out_dir: str, show: bool):
 
 
 def plot_internal_force(plt, runs: list[Run], out_dir: str, show: bool):
-    """【预留】画内力 h_int（int_{l,r}_{fx..mz} 列）。
+    """画内力 h_int（int_{l,r}_{fx..mz} 列）。
 
-    这些列由 coop::internalWrenchForLogging() 填入；未实现时全为 NaN，此时跳过。
-    实现后建议关注：‖f_int‖ 的峰值与稳态值（基线 vs 协同），以及沿两抓取点连线方向（x）的
+    关注：‖f_int‖ 的峰值与稳态值（基线 vs 协同），以及沿两抓取点连线方向（x）的
     分量——负值表示挤压、正值表示拉伸（取决于你的符号约定，见 docs/cooperative_control.md §4）。
     """
     valid = [r for r in runs if r.has("int_l_fx") and np.isfinite(r["int_l_fx"]).any()]
@@ -296,6 +296,37 @@ def plot_internal_force(plt, runs: list[Run], out_dir: str, show: bool):
     run_legend(fig, valid, component_handles(["x", "y", "z"]))
     fig.tight_layout(rect=(0, 0, 1, 0.92))
     save(fig, out_dir, "internal_force.png", show)
+
+
+def plot_governor(plt, runs: list[Run], out_dir: str, show: bool):
+    """画在线 reference governor 的状态机、参考偏移和任务相关距离。"""
+    valid = [r for r in runs if r.has("governor_phase")]
+    if not valid:
+        return
+
+    fig, axes = plt.subplots(3, 1, figsize=(11, 7.5), sharex=True)
+    for i, r in enumerate(valid):
+        color = SERIES[i % len(SERIES)]
+        axes[0].step(r.t, r["governor_phase"], where="post", color=color, label=r.label)
+        axes[1].plot(r.t, 1e3 * r["governor_offset"], color=color, label=r.label)
+        distance_key = "d_object~barrier" if r.has("d_object~barrier") else "d_min"
+        if r.has(distance_key):
+            axes[2].plot(r.t, 1e3 * r[distance_key], color=color, label=r.label)
+
+    axes[0].set_yticks([0, 1, 2, 3], ["NORMAL", "LIFT", "CROSS", "DESCEND"])
+    axes[0].set_ylabel("phase")
+    axes[0].set_title("Reference governor state")
+    axes[1].set_ylabel("offset [mm]")
+    axes[1].set_title("Avoidance reference offset")
+    axes[2].axhline(0.0, color=TEXT_2, ls="--", lw=0.8)
+    axes[2].set_ylabel("distance [mm]")
+    axes[2].set_xlabel("t [s]")
+    axes[2].set_title("Object-to-barrier distance (dashed = contact boundary)")
+    if len(valid) > 1:
+        axes[0].legend(loc="upper right")
+    fig.suptitle("Autonomous collision-avoidance reference governor", color=TEXT, y=0.995)
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    save(fig, out_dir, "governor.png", show)
 
 
 def print_summary(runs: list[Run]):
@@ -349,6 +380,7 @@ def main():
     plot_box(plt, runs, out_dir, args.show)
     plot_timing(plt, runs, out_dir, args.show)
     plot_internal_force(plt, runs, out_dir, args.show)
+    plot_governor(plt, runs, out_dir, args.show)
     if args.show:
         plt.show()
 
