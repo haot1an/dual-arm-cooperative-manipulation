@@ -1,7 +1,4 @@
-// 【测试模板】协同运动学 / 静力学。
-//
-// 这些测试针对 coop_kinematics.hpp 中的桩函数。桩函数目前返回 NaN，测试检测到 NaN
-// 会 GTEST_SKIP()；你实现对应函数后，测试会自动生效，无需修改本文件。
+// 协同运动学 / 静力学的代数性质和闭链一致性测试。
 // 需要验证的两条核心性质：
 //   (a) G · (I − G⁺G) h = 0 —— 零空间内力不改变物体合 wrench（式 4.3/4.4）
 //   (b) 理想闭链下 J_r · dq = 0 —— 相对运动为零（式 3.8）
@@ -16,11 +13,6 @@
 #include <random>
 
 using namespace dual_arm;
-
-#define SKIP_IF_NOT_IMPLEMENTED(x, fn)                                          \
-  do {                                                                          \
-    if (hasNaN(x)) GTEST_SKIP() << "coop::" fn "() 尚未实现（返回 NaN），跳过"; \
-  } while (0)
 
 namespace {
 
@@ -45,7 +37,6 @@ TEST(CoopTemplate, GraspMatrixMapsWrenchToObjectCenter) {
   const Vector3d p_i = p_o + randomVec3(rng, 0.3);
   const Vector3d r_i = p_o - p_i;  // 约定：抓取点 → 物体中心
   const Matrix6d Gi = coop::graspMatrixArm(r_i);
-  SKIP_IF_NOT_IMPLEMENTED(Gi, "graspMatrixArm");
 
   const Wrench h_i = (Wrench() << randomVec3(rng, 10.0), randomVec3(rng, 1.0)).finished();
   // G_i h_i 应等于“把 h_i 的参考点从 p_i 平移到 p_o”
@@ -59,7 +50,6 @@ TEST(CoopTemplate, InternalWrenchLiesInNullSpaceOfG) {
   std::mt19937 rng(2);
   const Vector3d r1 = randomVec3(rng, 0.3), r2 = randomVec3(rng, 0.3);
   const Matrix6x12d G = coop::graspMatrix(r1, r2);
-  SKIP_IF_NOT_IMPLEMENTED(G, "graspMatrix");
 
   // G 行满秩，零空间 6 维
   Eigen::FullPivLU<Matrix6x12d> lu(G);
@@ -70,7 +60,6 @@ TEST(CoopTemplate, InternalWrenchLiesInNullSpaceOfG) {
     Vector12d h;
     for (int i = 0; i < 12; ++i) h[i] = std::uniform_real_distribution<double>(-10, 10)(rng);
     const Vector12d h_int = coop::internalWrench(G, h);
-    SKIP_IF_NOT_IMPLEMENTED(h_int, "internalWrench");
     EXPECT_LT((G * h_int).norm(), 1e-9) << "(a) G·(I−G⁺G)h 必须为 0";
     // 与独立实现的投影一致
     const Vector12d ref = (Matrix12d::Identity() - referencePinv(G) * G) * h;
@@ -86,7 +75,6 @@ TEST(CoopTemplate, SqueezingIsPureInternalForce) {
   const Vector3d p_o(0, 0, 0.885), p1(-0.17, 0, 0.925), p2(0.17, 0, 0.925);
   const Vector3d r1 = p_o - p1, r2 = p_o - p2;
   const Matrix6x12d G = coop::graspMatrix(r1, r2);
-  SKIP_IF_NOT_IMPLEMENTED(G, "graspMatrix");
   Vector12d h = Vector12d::Zero();
   h[0] = 30.0;   // f_1x
   h[6] = -30.0;  // f_2x
@@ -98,7 +86,6 @@ TEST(CoopTemplate, SqueezingIsPureInternalForce) {
   EXPECT_NEAR((G * h_push)[0], 60.0, 1e-12);
 
   const Vector6d h_r = coop::internalWrenchCoordinates(r1, r2, h);
-  SKIP_IF_NOT_IMPLEMENTED(h_r, "internalWrenchCoordinates");
   EXPECT_LT(h_r[0], 0.0) << "约定：沿左→右方向，h_r 分量 < 0 表示挤压";
   EXPECT_NEAR(h_r[0], -30.0, 1e-12);
 }
@@ -149,13 +136,11 @@ TEST(CoopTemplate, DistributionReproducesObjectWrench) {
   std::mt19937 rng(3);
   const Vector3d r1(0.2, 0.01, -0.02), r2(-0.2, 0.0, 0.01);
   const Matrix6x12d G = coop::graspMatrix(r1, r2);
-  SKIP_IF_NOT_IMPLEMENTED(G, "graspMatrix");
   const Wrench w_o = (Wrench() << randomVec3(rng, 20.0), randomVec3(rng, 2.0)).finished();
   Vector12d h_int;
   for (int i = 0; i < 12; ++i) h_int[i] = std::uniform_real_distribution<double>(-10, 10)(rng);
 
   const Vector12d h = coop::distributeObjectWrench(G, w_o, h_int, Matrix12d::Identity());
-  SKIP_IF_NOT_IMPLEMENTED(h, "distributeObjectWrench");
   EXPECT_LT((G * h - w_o).norm(), 1e-9) << "内力项不能改变物体合 wrench";
 
   // 加权伪逆：左臂 λ1 = 0.8，纯力、r_i = 0 时左臂应承担 80%（式 5.3）
@@ -164,7 +149,6 @@ TEST(CoopTemplate, DistributionReproducesObjectWrench) {
   W.topLeftCorner<6, 6>() /= 0.8;
   W.bottomRightCorner<6, 6>() /= 0.2;
   const Matrix12x6d Gp = coop::weightedPseudoInverse(G0, W);
-  SKIP_IF_NOT_IMPLEMENTED(Gp, "weightedPseudoInverse");
   const Wrench f = (Wrench() << 0, 0, 10, 0, 0, 0).finished();
   const Vector12d hw = Gp * f;
   EXPECT_NEAR(hw[2], 8.0, 1e-9);
@@ -284,10 +268,7 @@ TEST(CoopTemplate, RelativeJacobianVanishesOnIdealClosedChain) {
 
   const Matrix6x14d Jr = coop::relativeJacobian(J1, J2, r1, r2);
   const Matrix6x14d Ja = coop::absoluteJacobian(J1, J2, r1, r2);
-  SKIP_IF_NOT_IMPLEMENTED(Jr, "relativeJacobian");
-  SKIP_IF_NOT_IMPLEMENTED(Ja, "absoluteJacobian");
   const Matrix6d G1 = coop::graspMatrixArm(r1), G2 = coop::graspMatrixArm(r2);
-  SKIP_IF_NOT_IMPLEMENTED(G1, "graspMatrixArm");
 
   std::mt19937 rng(4);
   for (int k = 0; k < 10; ++k) {
@@ -316,7 +297,6 @@ TEST(CoopTemplate, EeReferencesConsistentWithObjectReference) {
   ref.accel << 0.3, 0.1, -0.2, 0.5, 0.2, -0.4;
 
   const auto ee = coop::eeReferencesFromObject(ref, grasp);
-  SKIP_IF_NOT_IMPLEMENTED(ee[0].twist, "eeReferencesFromObject");
   for (Arm a : kArms) {
     const int i = armIndex(a);
     const Pose expected = ref.pose * grasp[i];
