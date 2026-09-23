@@ -216,6 +216,16 @@ governor 能生成越障参考，但缺少距离约束时安全裕量不足；�
 
 完整实验条件和指标见 [第二阶段实验报告](docs/experiment_results.md)。
 
+运行固定随机种子的多试次鲁棒性扫参：
+
+```bash
+./scripts/run_robustness_sweep.py --trials 12 --seed 20260923
+```
+
+该实验在预先声明的包络内随机化基座外参、外部 wrench、方向和施加时刻，输出成功率与最坏样本，
+用于补充单次确定性实验。固定 seed 的 12 次回归全部通过，最坏终态位置误差为 0.501 mm，
+最小障碍距离为 10.000 mm；它仍然不是实机可靠性保证。
+
 运行所有核心场景的任务级验收：
 
 ```bash
@@ -297,6 +307,7 @@ tools/                标定、场景设计辅助工具
 
 - [协同控制原理](docs/cooperative_control.md)
 - [第二阶段实验报告](docs/experiment_results.md)
+- [项目面试问题与回答主线](docs/interview_questions.md)
 - [代码地图](docs/code_map.md)
 - [模型来源与许可证](models/README.md)
 

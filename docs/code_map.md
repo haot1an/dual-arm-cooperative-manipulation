@@ -17,6 +17,7 @@ dual_arm_ws/
 ├── scripts/run_portfolio_demo.sh 一键 A/B 作品集实验
 ├── scripts/run_experiment_matrix.py 消融与不确定性实验
 ├── scripts/run_acceptance_suite.py  核心场景验收矩阵
+├── scripts/run_robustness_sweep.py  固定种子的随机鲁棒性扫参
 ├── scripts/run_realtime_benchmark.py 持续 1 kHz 耗时测量
 └── tools/                        标定与场景设计辅助程序
 ```
