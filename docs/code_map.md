@@ -15,6 +15,9 @@ dual_arm_ws/
 ├── tests/                        单元、集成、几何与零分配测试
 ├── scripts/plot_log.py           CSV 对比绘图
 ├── scripts/run_portfolio_demo.sh 一键 A/B 作品集实验
+├── scripts/run_experiment_matrix.py 消融与不确定性实验
+├── scripts/run_acceptance_suite.py  核心场景验收矩阵
+├── scripts/run_realtime_benchmark.py 持续 1 kHz 耗时测量
 └── tools/                        标定与场景设计辅助程序
 ```
 

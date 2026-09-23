@@ -31,8 +31,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG_DIR = os.path.join(ROOT, "logs")
 
 # 颜色：按固定顺序分配的分类色（x/y/z 分量，或不同运行），不循环、不按大小重排
-SERIES = ["#2a78d6", "#eb6834", "#1baf7a"]  # 蓝、橙、青
-RUN_STYLES = ["-", "--", ":"]               # 多次运行用线型区分（颜色留给分量）
+SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#8b5cf6"]  # 蓝、橙、青、紫
+RUN_STYLES = ["-", "--", ":", "-."]                  # 多次运行用线型区分
 TEXT = "#0b0b0b"
 TEXT_2 = "#52514e"
 GRID = "#e4e3df"
@@ -141,7 +141,7 @@ def run_legend(fig, runs: list[Run], extra: list | None = None):
     from matplotlib.lines import Line2D
     handles = list(extra or [])
     if len(runs) > 1:
-        handles += [Line2D([], [], color=TEXT_2, ls=RUN_STYLES[i % 3], label=r.label)
+        handles += [Line2D([], [], color=TEXT_2, ls=RUN_STYLES[i % len(RUN_STYLES)], label=r.label)
                     for i, r in enumerate(runs)]
     if handles:
         # 图例单独占一行，位于总标题下方
@@ -171,7 +171,7 @@ def plot_joint_torques(plt, runs: list[Run], out_dir: str, show: bool):
         for j in range(7):
             ax = axes[row, j]
             for i, r in enumerate(runs):
-                ax.plot(r.t, r[f"{p}_tau{j + 1}"], color=SERIES[i % 3], ls="-", label=r.label)
+                ax.plot(r.t, r[f"{p}_tau{j + 1}"], color=SERIES[i % len(SERIES)], ls="-", label=r.label)
             for s in (-1, 1):
                 ax.axhline(s * TAU_LIMIT[j], color=TEXT_2, ls="--", lw=0.8)
             ax.set_title(f"{name} joint {j + 1}")
@@ -187,7 +187,7 @@ def plot_joint_torques(plt, runs: list[Run], out_dir: str, show: bool):
     fig.suptitle("Joint torques (dashed = torque limit)", color=TEXT, y=0.995)
     if len(runs) > 1:
         from matplotlib.lines import Line2D
-        fig.legend(handles=[Line2D([], [], color=SERIES[i % 3], label=r.label) for i, r in enumerate(runs)],
+        fig.legend(handles=[Line2D([], [], color=SERIES[i % len(SERIES)], label=r.label) for i, r in enumerate(runs)],
                    loc="upper center", ncol=len(runs), bbox_to_anchor=(0.5, 0.955))
         fig.tight_layout(rect=(0, 0, 1, 0.9))
     else:
@@ -206,7 +206,7 @@ def plot_wrench(plt, runs: list[Run], out_dir: str, show: bool, source: str):
             shade_disturbance(ax, runs[0])
             for i, r in enumerate(runs):
                 for c, k in enumerate(keys):
-                    ax.plot(r.t, r[f"{p}_{source}_{k}"], color=SERIES[c], ls=RUN_STYLES[i % 3])
+                    ax.plot(r.t, r[f"{p}_{source}_{k}"], color=SERIES[c], ls=RUN_STYLES[i % len(RUN_STYLES)])
             ax.set_title(f"{name} arm")
             ax.set_ylabel(unit)
             if row == 1:
@@ -222,7 +222,7 @@ def plot_box(plt, runs: list[Run], out_dir: str, show: bool):
     for ax in axes:
         shade_disturbance(ax, runs[0])
     for i, r in enumerate(runs):
-        ls = RUN_STYLES[i % 3]
+        ls = RUN_STYLES[i % len(RUN_STYLES)]
         for c, k in enumerate("xyz"):
             axes[0].plot(r.t, 1e3 * (r[f"obj_{k}"] - r[f"obj_{k}"][0]), color=SERIES[c], ls=ls)
             axes[1].plot(r.t, 1e3 * r[f"obj_err_{k}"], color=SERIES[c], ls=ls)
@@ -245,7 +245,7 @@ def plot_timing(plt, runs: list[Run], out_dir: str, show: bool):
     hi = max(np.percentile(r["t_ctrl_us"], 99.9) for r in runs)
     bins = np.linspace(0, max(hi, 1e-3), 60)
     for i, r in enumerate(runs):
-        c = SERIES[i % 3]
+        c = SERIES[i % len(SERIES)]
         x = r["t_ctrl_us"]
         ax0.plot(r.t, x, color=c, lw=0.6, label=r.label)
         ax1.hist(np.clip(x, 0, bins[-1]), bins=bins, color=c, alpha=0.55, label=r.label)
@@ -282,9 +282,9 @@ def plot_internal_force(plt, runs: list[Run], out_dir: str, show: bool):
         shade_disturbance(ax_n, valid[0])
         for i, r in enumerate(valid):
             for c, k in enumerate(WRENCH[:3]):
-                ax_f.plot(r.t, r[f"int_{p}_{k}"], color=SERIES[c], ls=RUN_STYLES[i % 3])
+                ax_f.plot(r.t, r[f"int_{p}_{k}"], color=SERIES[c], ls=RUN_STYLES[i % len(RUN_STYLES)])
             fn = np.sqrt(sum(r[f"int_{p}_{k}"] ** 2 for k in WRENCH[:3]))
-            ax_n.plot(r.t, fn, color=TEXT_2, ls=RUN_STYLES[i % 3], label=r.label)
+            ax_n.plot(r.t, fn, color=TEXT_2, ls=RUN_STYLES[i % len(RUN_STYLES)], label=r.label)
             print(f"  [{r.label}] {name}: max |f_int| = {np.nanmax(fn):.2f} N, "
                   f"final |f_int| = {fn[-1]:.2f} N")
         ax_f.set_title(f"{name} arm: internal force components")
@@ -352,8 +352,8 @@ def main():
     paths = args.runs or latest_runs(args.latest or 1)
     if args.latest and args.runs:
         sys.exit("不要同时给出运行路径和 --latest")
-    if len(paths) > 3:
-        sys.exit("最多同时对比 3 次运行（线型只有 3 种）")
+    if len(paths) > 4:
+        sys.exit("最多同时对比 4 次运行")
     labels = args.labels or [None] * len(paths)
     if len(labels) != len(paths):
         sys.exit("--labels 的个数必须与运行个数相同")

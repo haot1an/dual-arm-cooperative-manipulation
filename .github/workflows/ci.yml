@@ -1,0 +1,75 @@
+name: build-and-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  linux-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      MUJOCO_VERSION: 3.12.0
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++ curl \
+            libeigen3-dev libyaml-cpp-dev libgtest-dev
+
+      - name: Download official MuJoCo binary
+        run: |
+          curl --fail --location --retry 3 \
+            "https://github.com/google-deepmind/mujoco/releases/download/${MUJOCO_VERSION}/mujoco-${MUJOCO_VERSION}-linux-x86_64.tar.gz" \
+            --output "${RUNNER_TEMP}/mujoco.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/mujoco.tar.gz" -C "${RUNNER_TEMP}"
+
+          # The official binary archive contains headers and libmujoco.so but no
+          # CMake package files. Provide a minimal imported target for find_package.
+          mkdir -p "${RUNNER_TEMP}/mujoco-${MUJOCO_VERSION}/lib/cmake/mujoco"
+          cat > "${RUNNER_TEMP}/mujoco-${MUJOCO_VERSION}/lib/cmake/mujoco/mujocoConfig.cmake" <<EOF
+          set(mujoco_VERSION "${MUJOCO_VERSION}")
+          if(NOT TARGET mujoco::mujoco)
+            add_library(mujoco::mujoco SHARED IMPORTED)
+            set_target_properties(mujoco::mujoco PROPERTIES
+              IMPORTED_LOCATION "${RUNNER_TEMP}/mujoco-${MUJOCO_VERSION}/lib/libmujoco.so"
+              INTERFACE_INCLUDE_DIRECTORIES "${RUNNER_TEMP}/mujoco-${MUJOCO_VERSION}/include")
+          endif()
+          EOF
+          cat > "${RUNNER_TEMP}/mujoco-${MUJOCO_VERSION}/lib/cmake/mujoco/mujocoConfigVersion.cmake" <<EOF
+          set(PACKAGE_VERSION "${MUJOCO_VERSION}")
+          if(PACKAGE_VERSION VERSION_LESS PACKAGE_FIND_VERSION)
+            set(PACKAGE_VERSION_COMPATIBLE FALSE)
+          else()
+            set(PACKAGE_VERSION_COMPATIBLE TRUE)
+            if(PACKAGE_FIND_VERSION STREQUAL PACKAGE_VERSION)
+              set(PACKAGE_VERSION_EXACT TRUE)
+            endif()
+          endif()
+          EOF
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-ci -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDUAL_ARM_BUILD_VIEWER=OFF \
+            -DDUAL_ARM_WERROR=ON \
+            -Dmujoco_DIR="${RUNNER_TEMP}/mujoco-${MUJOCO_VERSION}/lib/cmake/mujoco"
+
+      - name: Build
+        run: cmake --build build-ci --parallel 2
+
+      - name: Test
+        env:
+          LD_LIBRARY_PATH: ${{ runner.temp }}/mujoco-3.12.0/lib
+        run: ctest --test-dir build-ci --output-on-failure

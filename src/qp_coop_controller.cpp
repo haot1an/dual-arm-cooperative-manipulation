@@ -40,7 +40,9 @@ QpCoopController::QpCoopController(
     }
   }
 
-  if (qp_config_.collision_avoidance_enabled && !scene().obstacles.empty())
+  if ((qp_config_.collision_avoidance_enabled ||
+       qp_config_.reference_governor.enabled) &&
+      !scene().obstacles.empty())
   {
     CollisionConfig controller_collision_config = collision_config;
     controller_collision_config.margin = std::max(
@@ -259,7 +261,8 @@ std::pair<Vector7d, Vector7d> QpCoopController::compute(
       JointSafetyTorqueQp::CollisionVector::Zero();
   active_collision_constraints_ = 0;
 
-  if (collision_model_ && collision_distances)
+  if (qp_config_.collision_avoidance_enabled &&
+      collision_model_ && collision_distances)
   {
     const auto& distances = *collision_distances;
 

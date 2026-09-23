@@ -1,0 +1,87 @@
+{
+  "scenarios": {
+    "lift": {
+      "run": {
+        "scene": "lift",
+        "controller": "qp_coop",
+        "duration": 10,
+        "overrides": [
+          "simulation.contacts=false",
+          "disturbances=[]",
+          "log.decimation=5"
+        ]
+      },
+      "checks": [
+        {"metric": "position_error_final_mm", "op": "le", "value": 2.0},
+        {"metric": "orientation_error_final_deg", "op": "le", "value": 0.5},
+        {"metric": "distance_min_mm.object~target_step", "op": "ge", "value": 0.4},
+        {"metric": "distance_min_mm.left_arm~target_step", "op": "ge", "value": 10.0},
+        {"metric": "distance_min_mm.right_arm~target_step", "op": "ge", "value": 10.0},
+        {"metric": "torque_saturation_steps", "op": "eq", "value": 0}
+      ]
+    },
+    "slot": {
+      "run": {
+        "scene": "slot",
+        "controller": "qp_coop",
+        "duration": 15,
+        "overrides": [
+          "simulation.contacts=false",
+          "disturbances=[]",
+          "log.decimation=5"
+        ]
+      },
+      "checks": [
+        {"metric": "position_error_final_mm", "op": "le", "value": 2.0},
+        {"metric": "orientation_error_final_deg", "op": "le", "value": 0.6},
+        {"metric": "distance_min_mm.min", "op": "ge", "value": 0.4},
+        {"metric": "torque_saturation_steps", "op": "eq", "value": 0}
+      ]
+    },
+    "slot_avoid": {
+      "run": {
+        "scene": "slot_avoid",
+        "controller": "qp_coop",
+        "duration": 20,
+        "overrides": [
+          "simulation.contacts=false",
+          "disturbances=[]",
+          "log.decimation=5"
+        ]
+      },
+      "checks": [
+        {"metric": "position_error_final_mm", "op": "le", "value": 2.0},
+        {"metric": "orientation_error_final_deg", "op": "le", "value": 0.6},
+        {"metric": "distance_min_mm.object~barrier", "op": "ge", "value": 9.5},
+        {"metric": "distance_min_mm.object~slot_frame", "op": "ge", "value": 0.4},
+        {"metric": "governor_triggers", "op": "eq", "value": 1},
+        {"metric": "governor_phase_sequence", "op": "contains_sequence", "value": ["NORMAL", "LIFT", "CROSS", "DESCEND", "NORMAL"]},
+        {"metric": "controller_p99_us", "op": "lt", "value": 1000.0},
+        {"metric": "torque_saturation_steps", "op": "eq", "value": 0}
+      ]
+    },
+    "assembly": {
+      "run": {
+        "scene": "assembly",
+        "controller": "qp_asym_coop",
+        "duration": 14,
+        "overrides": [
+          "simulation.contacts=false",
+          "disturbances=[]",
+          "log.decimation=5"
+        ]
+      },
+      "checks": [
+        {"metric": "assembly_phase_final", "op": "eq", "value": 3.0},
+        {"metric": "preload_meas_final_n", "op": "ge", "value": 4.5},
+        {"metric": "preload_meas_final_n", "op": "le", "value": 5.5},
+        {"metric": "tightening_torque_meas_final_nm", "op": "ge", "value": 0.9},
+        {"metric": "screw_angle_final_deg", "op": "le", "value": -140.0},
+        {"metric": "object_drift_max_mm", "op": "le", "value": 2.0},
+        {"metric": "distance_min_mm.min", "op": "ge", "value": 10.0},
+        {"metric": "controller_p99_us", "op": "lt", "value": 1000.0},
+        {"metric": "torque_saturation_steps", "op": "eq", "value": 0}
+      ]
+    }
+  }
+}

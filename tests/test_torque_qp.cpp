@@ -515,3 +515,62 @@ TEST(QpCoopController, CooperativeTransportClearsBarrierAndInserts)
   EXPECT_LT(controller.closedChainAccelerationResidual(), 1e-4);
   EXPECT_LT(controller.maxCollisionSlack(), 1e-6);
 }
+
+TEST(QpCoopController, ReferenceGovernorWorksWithoutCollisionDamper)
+{
+  const SimConfig cfg = test::testConfig(
+      {
+          "controller.type=qp_coop",
+          "controller.torque_qp.collision_avoidance_enabled=false",
+          "object_trajectory.type=waypoints",
+          "simulation.contacts=false",
+          "disturbances=[]",
+      },
+      "slot_avoid");
+
+  SimEnv env(cfg);
+  auto model = std::make_shared<MujocoRobotModel>(cfg);
+  auto trajectory = std::make_shared<ObjectTrajectory>(
+      cfg.object_trajectory,
+      env.state().object.pose,
+      env.scene().waypoints);
+  QpCoopController controller(
+      model,
+      trajectory,
+      cfg.coop,
+      cfg.torque_qp,
+      cfg.collision,
+      cfg.timestep);
+  controller.reset(env.state());
+
+  bool saw_lift = false;
+  bool saw_cross = false;
+  bool saw_descend = false;
+  for (int k = 0; k < 14000; ++k)
+  {
+    const auto [tau_left, tau_right] =
+        controller.compute(env.state(), env.time());
+    ASSERT_TRUE(tau_left.allFinite());
+    ASSERT_TRUE(tau_right.allFinite());
+    EXPECT_EQ(controller.activeCollisionConstraints(), 0);
+    saw_lift = saw_lift ||
+        controller.governorPhase() == QpCoopController::GovernorPhase::Lift;
+    saw_cross = saw_cross ||
+        controller.governorPhase() == QpCoopController::GovernorPhase::Cross;
+    saw_descend = saw_descend ||
+        controller.governorPhase() == QpCoopController::GovernorPhase::Descend;
+    env.step(tau_left, tau_right);
+  }
+
+  EXPECT_FALSE(env.diverged());
+  EXPECT_EQ(controller.qpStatus(), JointSafetyTorqueQp::Status::Solved);
+  EXPECT_TRUE(saw_lift);
+  EXPECT_TRUE(saw_cross);
+  EXPECT_TRUE(saw_descend);
+  EXPECT_EQ(
+      controller.governorPhase(),
+      QpCoopController::GovernorPhase::Normal);
+  EXPECT_NEAR(controller.governorOffset(), 0.0, 1e-12);
+  EXPECT_EQ(controller.activeCollisionConstraints(), 0);
+  EXPECT_LT(controller.closedChainAccelerationResidual(), 1e-4);
+}

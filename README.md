@@ -1,11 +1,13 @@
 # Dual-Arm Cooperative Manipulation
 
+[![build-and-test](https://github.com/haot1an/dual-arm-cooperative-manipulation/actions/workflows/ci.yml/badge.svg)](https://github.com/haot1an/dual-arm-cooperative-manipulation/actions/workflows/ci.yml)
+
 基于 C++17、Eigen 与 MuJoCo 的双 Franka Panda 闭链协作控制实验平台。项目覆盖刚性抓取后的协同搬运、
 窄槽插入、非对称螺钉装配，以及带力矩级 QP 和在线 reference governor 的自主越障。
 
 ![自主越障演示](docs/img/slot_avoid_autonomous.gif)
 
-> 当前状态：97/97 自动测试通过；所有主要控制循环均通过 1 kHz 路径零动态内存分配测试。
+> 当前状态：98/98 自动测试通过；所有主要控制循环均通过 1 kHz 路径零动态内存分配测试。
 
 ## 核心能力
 
@@ -189,6 +191,52 @@ baseline.mp4              # 使用 --record 时生成
 autonomous_qp.mp4         # 使用 --record 时生成
 ```
 
+## 消融、鲁棒性与验收
+
+运行四组避障消融和三组鲁棒性实验：
+
+```bash
+./scripts/run_experiment_matrix.py
+```
+
+消融组包括 `straight_coop`、`qp_only`、`governor_without_collision_damper` 和
+`full_qp_governor`。后两组都保留闭链/关节 QP，但第三组关闭碰撞 damper 不等式，
+用于隔离 reference governor 的贡献。鲁棒性组分别注入基座标定误差、外部 wrench 和二者组合。
+
+一次可复现实验的核心结果如下。单独使用 QP 会在障碍前安全停止但无法完成任务；单独使用
+governor 能生成越障参考，但缺少距离约束时安全裕量不足；二者组合后同时满足避障和终态精度。
+
+| 配置 | 障碍最小距离 | 终态位置误差 | 结论 |
+|---|---:|---:|---|
+| 普通 `coop` | -30.12 mm | 0.00 mm | 穿透障碍 |
+| 仅 QP collision damper | 9.81 mm | 114.53 mm | 安全停止，任务未完成 |
+| governor，无 collision damper | 7.02 mm | 0.00 mm | 完成，但未满足 9.5 mm 裕量 |
+| 完整 QP + governor | 10.00 mm | 0.00 mm | 通过 |
+| 完整方案 + 标定误差 + 外扰 | 10.00 mm | 0.02 mm | 通过 |
+
+完整实验条件和指标见 [第二阶段实验报告](docs/experiment_results.md)。
+
+运行所有核心场景的任务级验收：
+
+```bash
+./scripts/run_acceptance_suite.py
+```
+
+验收阈值集中在 [config/acceptance.json](config/acceptance.json)，包括终态误差、任务相关最小距离、
+governor 状态序列、装配预紧/拧紧指标、力矩饱和和 P99 耗时。
+
+持续 1 kHz soft real-time benchmark：
+
+```bash
+./scripts/run_realtime_benchmark.py --duration 60
+
+# 可选：固定到指定 CPU
+./scripts/run_realtime_benchmark.py --duration 60 --cpu 3
+```
+
+输出 mean、P99、P99.9、max 和超过 1 ms 的周期数/比例。该测试是普通 Linux 上的 soft real-time
+测量，GitHub 共享 runner 不执行实时 deadline 验收。
+
 ## 日志与绘图
 
 每次运行会在 `logs/<timestamp>_<scene>_<controller>/` 保存：
@@ -211,7 +259,7 @@ python3 scripts/plot_log.py logs/run_A logs/run_B --labels A B --out artifacts/c
 ctest --test-dir build --output-on-failure
 ```
 
-当前结果：`97/97` 通过，覆盖：
+当前结果：`98/98` 通过，覆盖：
 
 - Jacobian、`Jdot*qdot` 与动力学量有限差分/结构验证；
 - 抓取矩阵功率一致性、内力零空间与负载分配；
@@ -248,6 +296,7 @@ tools/                标定、场景设计辅助工具
 进一步阅读：
 
 - [协同控制原理](docs/cooperative_control.md)
+- [第二阶段实验报告](docs/experiment_results.md)
 - [代码地图](docs/code_map.md)
 - [模型来源与许可证](models/README.md)
 

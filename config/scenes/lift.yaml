@@ -30,7 +30,8 @@ obstacles:
     - [right_arm, table_top]
     - [left_arm, target_step]
     - [right_arm, target_step]
-    - [object, target_step]
+    # 放置任务允许物体接近台阶表面；机械臂与台阶仍使用全局 10 mm 安全距离。
+    - {a: object, b: target_step, safe_distance: 0.001}
 
 # 任务航点：物体中心在世界系下的位姿序列（rpy 为 R = Rz Ry Rx，度）
 waypoints:
