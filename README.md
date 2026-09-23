@@ -35,6 +35,37 @@
 自主版本最终 QP 约束违反为 `1.70e-9`，闭链加速度残差为 `1.75e-9`。这些数字来自一次普通
 Linux Release 构建，属于面向 1 kHz 的 soft real-time 实验结果，不代表 hard real-time 保证。
 
+## Demo Gallery
+
+### 非对称双臂螺钉装配
+
+![非对称双臂螺钉装配](docs/img/assembly_asym_coop.gif)
+
+左臂作为 holding arm 稳定工件，右臂作为 working arm 沿螺旋自由度调节轴向预紧力和拧紧力矩。
+状态机从预紧进入旋转/力矩控制，最终到达 `HOLD`。
+
+| 装配指标 | `qp_asym_coop` |
+|---|---:|
+| 螺钉转角 | -150.73 deg |
+| 轴向进给 | 0.546 mm |
+| 预紧力测量 / 目标 | 4.99 / 5.00 N |
+| 拧紧力矩测量 / 目标 | 0.97 / 1.00 N·m |
+| 工件最大位置漂移 | 1.18 mm |
+| 力矩饱和步数 | 0 |
+| 终止状态 | `HOLD` |
+
+可视化运行：
+
+```bash
+./build/run_sim \
+  --scene assembly \
+  --controller qp_asym_coop \
+  --duration 14 \
+  --camera cam_front \
+  --set simulation.contacts=false \
+  --set 'disturbances=[]'
+```
+
 ## 控制链路
 
 ```mermaid
