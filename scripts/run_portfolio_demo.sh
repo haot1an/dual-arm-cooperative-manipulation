@@ -45,6 +45,8 @@ common_args=(
   --camera cam_front
   --set simulation.contacts=false
   --set 'disturbances=[]'
+  # 本作品集 A/B 展示的是状态机 governor（slot_avoid 默认已改为 CBF，见 docs/cbf_reference_governor.md）
+  --set controller.torque_qp.reference_governor.mode=state_machine
 )
 
 baseline_record=()

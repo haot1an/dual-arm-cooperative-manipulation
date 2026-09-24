@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 TORQUE_LIMITS = [87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0]
-PHASE_NAMES = ["NORMAL", "LIFT", "CROSS", "DESCEND"]
+PHASE_NAMES = ["NORMAL", "LIFT", "CROSS", "DESCEND", "CBF"]
 
 
 def resolve_log(path: str | Path) -> Path:

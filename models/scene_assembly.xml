@@ -7,11 +7,21 @@
   用 <equality joint> 按导程耦合：slide = (lead / 2π) · hinge。右旋螺纹：从上往下看顺时针（hinge 为负）拧紧，
   螺钉向下进给（slide 为负）。初始时螺钉头底面离座面 0.5 mm（config 中 seat_depth），再拧 144° 贴合座面，
   之后由 SimEnv 按拧入深度施加随深度增大的阻力矩（模拟座面贴合）。
-  右臂夹持一个套筒工具（独立 body，weld 到右手），工具尖端 weld 到螺钉头。
+  右臂夹持一把内六角螺丝刀（独立 body，weld 模式下 weld 到右手；接触模式下靠夹指摩擦），刀头 weld 到螺钉头。
   闭链：右臂 → 工具 → 螺钉 →（螺旋副，1 自由度）→ 工件 → 左臂。
 -->
 <mujoco model="scene_assembly">
   <include file="workcell.xml"/>
+
+  <!-- 内六角：M8 内六角圆柱头螺钉用 6 mm 对边的六角扳手头 -->
+  <asset>
+    <mesh name="hex_bit" vertex="0.003000 0.001732 -0.007500 0.000000 0.003464 -0.007500 -0.003000 0.001732 -0.007500 -0.003000 -0.001732 -0.007500 -0.000000 -0.003464 -0.007500 0.003000 -0.001732 -0.007500 0.003000 0.001732 0.007500 0.000000 0.003464 0.007500 -0.003000 0.001732 0.007500 -0.003000 -0.001732 0.007500 -0.000000 -0.003464 0.007500 0.003000 -0.001732 0.007500"/>
+    <mesh name="hex_socket" vertex="0.003100 0.001790 -0.000400 0.000000 0.003580 -0.000400 -0.003100 0.001790 -0.000400 -0.003100 -0.001790 -0.000400 -0.000000 -0.003580 -0.000400 0.003100 -0.001790 -0.000400 0.003100 0.001790 0.000400 0.000000 0.003580 0.000400 -0.003100 0.001790 0.000400 -0.003100 -0.001790 0.000400 -0.000000 -0.003580 0.000400 0.003100 -0.001790 0.000400"/>
+    <material name="grip_red" rgba="0.78 0.12 0.10 1" specular="0.3" shininess="0.4"/>
+    <material name="grip_rubber" rgba="0.12 0.12 0.13 1" specular="0.05"/>
+    <material name="steel" rgba="0.78 0.80 0.83 1" specular="0.8" shininess="0.8" reflectance="0.1"/>
+    <material name="black_oxide" rgba="0.16 0.16 0.18 1" specular="0.4" shininess="0.5"/>
+  </asset>
 
   <worldbody>
     <camera name="cam_iso" pos="0.75 0.55 1.75" xyaxes="-0.8000 0.6000 0.0000 -0.3374 -0.4498 0.8269"/>
@@ -42,22 +52,40 @@
              0.01 kg·m² 相对右臂 joint7 自身的 armature 0.1 kg·m² 很小。阻尼 / 摩擦由 config 的 screw 段覆盖。 -->
         <joint name="screw_hinge" type="hinge" axis="0 0 1" damping="0.02" frictionloss="0.05" armature="0.01"/>
         <joint name="screw_slide" type="slide" axis="0 0 1" damping="1.0" armature="1" range="-0.004 0.002"/>
-        <geom name="screw_head" type="cylinder" size="0.0065 0.0025" pos="0 0 0.0025" material="prop_dark" mass="0.004"/>
-        <geom name="screw_shank" type="cylinder" size="0.004 0.010" pos="0 0 -0.010" material="metal" mass="0.004"
+        <!-- 内六角圆柱头：发黑处理的头部 + 顶面 6 mm 内六角孔（黑色，仅视觉） -->
+        <geom name="screw_head" type="cylinder" size="0.0065 0.0025" pos="0 0 0.0025" material="black_oxide" mass="0.004"/>
+        <geom name="screw_shank" type="cylinder" size="0.004 0.010" pos="0 0 -0.010" material="black_oxide" mass="0.004"
           contype="0" conaffinity="0"/>
-        <geom name="screw_mark" type="box" size="0.006 0.0008 0.0004" pos="0 0 0.0052" rgba="0.9 0.9 0.2 1"
+        <geom name="screw_socket" type="mesh" mesh="hex_socket" pos="0 0 0.0048" rgba="0.02 0.02 0.02 1"
           contype="0" conaffinity="0" mass="0"/>
         <site name="screw_head_top" pos="0 0 0.005" size="0.003" rgba="1 0 1 1"/>
       </body>
     </body>
 
-    <!-- 套筒工具：body 原点在工具尖端，+z 沿工具轴向上；右手在 z = 0.09 处夹持 -->
+    <!-- 内六角螺丝刀：body 原点在六角头尖端（顶在螺钉头顶面），+z 沿刀杆向上。
+         六角头 6 mm 对边（伸入螺钉内六角孔 3 mm）→ 铬钒钢刀杆 Ø7 mm → 金属套箍 → Ø32 mm 红色手柄（带黑色防滑条）→ 端盖。
+         手柄 z ∈ [0.052, 0.114]，右手 TCP 在 z = 0.09；手掌前端在 TCP 后 37.4 mm（z ≈ 0.127），端盖顶 z = 0.119 不入掌。
+         只有手柄是碰撞体（与夹指接触、参与避障距离）；其余几何只做视觉并带质量。 -->
     <body name="tool" pos="-0.10 -0.45 0.8955">
       <freejoint name="tool_joint"/>
-      <geom name="tool_socket" type="cylinder" size="0.009 0.010" pos="0 0 0.010" material="prop_dark" mass="0.03"/>
-      <geom name="tool_shaft" type="cylinder" size="0.006 0.060" pos="0 0 0.060" material="metal" mass="0.08"/>
-      <geom name="tool_mark" type="box" size="0.0095 0.0015 0.004" pos="0 0 0.016" rgba="0.9 0.9 0.2 1"
-        contype="0" conaffinity="0" mass="0"/>
+      <geom name="tool_bit" type="mesh" mesh="hex_bit" pos="0 0 0.0045" material="steel" mass="0.004"
+        contype="0" conaffinity="0"/>
+      <geom name="tool_blade" type="cylinder" size="0.0035 0.018" pos="0 0 0.028" material="steel" mass="0.012"
+        contype="0" conaffinity="0"/>
+      <geom name="tool_ferrule" type="cylinder" size="0.0075 0.003" pos="0 0 0.047" material="metal" mass="0.004"
+        contype="0" conaffinity="0"/>
+      <geom name="tool_ferrule_flare" type="cylinder" size="0.012 0.0015" pos="0 0 0.0505" material="grip_rubber" mass="0.002"
+        contype="0" conaffinity="0"/>
+      <geom name="tool_handle" type="cylinder" size="0.016 0.031" pos="0 0 0.083" material="grip_red" mass="0.060"
+        friction="1.0 0.02 0.001"/>
+      <geom type="box" size="0.0025 0.0022 0.024" pos="0.0150 0 0.083" material="grip_rubber" contype="0" conaffinity="0" mass="0"/>
+      <geom type="box" size="0.0025 0.0022 0.024" pos="-0.0150 0 0.083" material="grip_rubber" contype="0" conaffinity="0" mass="0"/>
+      <geom type="box" size="0.0025 0.0022 0.024" pos="0.0075 0.0130 0.083" euler="0 0 1.0472" material="grip_rubber" contype="0" conaffinity="0" mass="0"/>
+      <geom type="box" size="0.0025 0.0022 0.024" pos="-0.0075 0.0130 0.083" euler="0 0 2.0944" material="grip_rubber" contype="0" conaffinity="0" mass="0"/>
+      <geom type="box" size="0.0025 0.0022 0.024" pos="0.0075 -0.0130 0.083" euler="0 0 -1.0472" material="grip_rubber" contype="0" conaffinity="0" mass="0"/>
+      <geom type="box" size="0.0025 0.0022 0.024" pos="-0.0075 -0.0130 0.083" euler="0 0 -2.0944" material="grip_rubber" contype="0" conaffinity="0" mass="0"/>
+      <geom name="tool_cap" type="ellipsoid" size="0.016 0.016 0.005" pos="0 0 0.114" material="grip_rubber" mass="0.004"
+        contype="0" conaffinity="0"/>
       <!-- 右手抓取点：z 指向工具尖端（竖直向下），y 为手指开合方向 -->
       <site name="grasp_R" pos="0 0 0.09" quat="0 1 0 0" size="0.006" rgba="0 0.8 0 1"/>
       <site name="tool_tip" size="0.003" rgba="1 0 1 1"/>

@@ -36,7 +36,14 @@ dual_arm_ws/
 | `coop_controller.*` | 物体阻抗、负载分配、内力反馈、零空间控制 | `test_gravity_comp.cpp` |
 | `asym_coop_controller.*` | 预紧—转角—扭矩—保持装配状态机 | assembly tests |
 | `torque_qp.*` | 固定尺寸 ADMM QP 与关节/闭链/碰撞约束 | `test_torque_qp.cpp` |
-| `qp_coop_controller.*` | 对称协作 QP 与在线 reference governor | slot/slot_avoid tests |
+| `qp_coop_controller.*` | 对称协作 QP 与在线 reference governor（状态机 / CBF 两种模式） | slot/slot_avoid tests |
+| `cbf_reference_filter.*` | 连续 CBF 参考滤波（slot_avoid 默认 governor，见 docs/cbf_reference_governor.md） | `test_cbf_reference_filter.cpp` |
+| `small_qp.*` | 对角 Hessian 小 QP 的精确解（LDP / NNLS，零分配） | `SmallQp.*` |
+| `trajectory_planner.*` | 物体空间轨迹优化（序列凸规划，见 docs/trajectory_planning.md） | `TrajectoryPlanner.*` |
+| `sparse_qp.*` | 稀疏 QP 的 ADMM 求解器（离线规划用） | `SparseQp.*` |
+| `path_deformation.*` | 规划结果：偏移样条 δ(τ)、姿态偏移 φ(τ) 与时间映射 τ(t) | `PathDeformation.*` |
+| `trajectory_optimizer.*` | 物体 SE(3) + 时间联合优化（直接配点 + 序列凸规划） | `TrajectoryOptimizer.*` |
+| `closed_chain_ik.*` | 双臂闭链 IK 与物体 twist → 关节增量（J⁺Gᵀ） | 规划器 / 优化器测试 |
 | `qp_asym_coop_controller.*` | 非对称装配 QP 包装器 | assembly QP test |
 | `collision_model.*` | geom pair 距离、关节梯度及并行查询 | `test_collision_model.cpp` |
 | `object_trajectory.*` | hold、min-jerk、sine、waypoint 轨迹 | `test_trajectory.cpp` |

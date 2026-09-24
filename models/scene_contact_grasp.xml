@@ -1,0 +1,15 @@
+<!-- 双臂真实接触夹取：无 weld；手指 slide joints/actuators 由 run_contact_grasp 编译前加入。 -->
+<mujoco model="scene_contact_grasp">
+  <include file="workcell.xml"/>
+  <worldbody>
+    <camera name="cam_iso" pos="0.95 1.15 2.3" xyaxes="-0.8666 0.4990 0 -0.3023 -0.5251 0.7956"/>
+    <camera name="cam_front" pos="0.45 -2.05 2.05" xyaxes="0.9603 0.2788 0 -0.1664 0.5730 0.8025"/>
+    <body name="rod" pos="0 -0.45 0.781">
+      <freejoint name="rod_joint"/>
+      <geom name="rod_geom" type="box" size="0.35 0.03 0.03" mass="1.5" material="wood"
+            friction="1.5 0.02 0.001"/>
+      <site name="grasp_L" pos="0.25 0 0.01" quat="0 1 0 0" size="0.008" rgba="0 0.8 0 1"/>
+      <site name="grasp_R" pos="-0.25 0 0.01" quat="0 1 0 0" size="0.008" rgba="0 0.8 0 1"/>
+    </body>
+  </worldbody>
+</mujoco>

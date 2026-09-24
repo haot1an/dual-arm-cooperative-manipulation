@@ -45,6 +45,10 @@ struct GraspSpec {
   std::string site;              ///< 抓取点 site（TCP 目标）
   std::string weld;              ///< 夹爪 hand ↔ 被抓 body 的 weld equality 名
   double finger_opening = 0.04;  ///< 手指固定开度（每指）[m]
+  // ---- 仅 contact_grasp（可动手指 + 摩擦接触）----
+  double contact_depth = 0.0;      ///< 抓取点沿 site +z（接近方向）再深入的距离 [m]，让被抓体更多进入两指之间
+  double contact_squeeze = 0.006;  ///< 闭合目标 = finger_opening − squeeze；决定夹持力（3000 N/m，限 35 N）[m]
+  double approach_distance = 0.06; ///< 预抓取位姿：TCP 沿 −z 退离抓取点的距离 [m]
   // ---- 由模型补全 ----
   std::string body;              ///< site 所属的 body（被抓的物体或工具）
   Pose site_in_body;             ///< 抓取点在该 body 坐标系中的位姿
@@ -97,6 +101,9 @@ struct SceneSpec {
   std::vector<Waypoint> waypoints;
   std::vector<std::string> cameras;
   ScrewParams screw;
+  /// 与 simulation.contact_grasp 相同；为 true 时 completeSceneSpec 把 grasp[i].contact_depth 计入 site_in_body，
+  /// 使 plant / 控制器模型 / 碰撞模型看到同一个抓取点。
+  bool contact_grasp = false;
 
   const GraspSpec& graspOf(Arm a) const { return grasp[armIndex(a)]; }
   /// 两手之间闭链的总相对自由度 Σ relative_dof（内力空间维数 = 6 − 它）

@@ -1,0 +1,39 @@
+MuJoCo 3.12.0: EPA horizon buffer overflow in native CCD (engine_collision_gjk.c)
+
+The EPA horizon buffers (indices / edges) are allocated with a fixed size of 24 ints, but
+addEdge() appends without a bounds check. A horizon is a closed loop of polytope edges; with
+ccd_iterations = N the polytope holds up to 5 + N vertices, so near-degenerate (almost
+face-parallel) contacts can produce horizons longer than 24 edges once N > 19. The overflow
+corrupts the mjData stack and crashes later in mj_freeStack() inside mj_narrowphase().
+Reproduced in dual_arm_ws (scene slot_gate, plate ~1.8 mm from the slot wall, ccd_iterations 50/100).
+
+Fix: size both buffers by the polytope capacity (at most 9N edges; 18N is used for margin).
+
+--- a/src/engine/engine_collision_gjk.c
++++ b/src/engine/engine_collision_gjk.c
+@@ -2293,12 +2293,21 @@
+ 
++// capacity of the EPA horizon buffers: a horizon is a closed loop of polytope edges; the previous
++// fixed size of 24 overflows for near-degenerate contacts when ccd_iterations > 19
++static int horizonCapacity(int iterations) {
++  int capacity = 18 * iterations;
++  return capacity < 24 ? 24 : capacity;
++}
++
+ // return size in bytes of the buffer needed for mjc_ccd for a given number of iterations
+ size_t mjc_ccdSize(int npolygonmax, int nmeshdegmax, int iterations) {
+   size_t epa_size = align8(sizeof(Vertex) * (5 + iterations))   // vertices in polytope
+                   + align8(sizeof(Face) * 6 * iterations)       // faces in polytope
+                   + align8(sizeof(Face*) * 6 * iterations)      // map in polytope
+-                  + align8(sizeof(int) * 24)                    // horizon indices
+-                  + align8(sizeof(int) * 24);                   // horizon edges
++                  + align8(sizeof(int) * horizonCapacity(iterations))   // horizon indices
++                  + align8(sizeof(int) * horizonCapacity(iterations));  // horizon edges
+ 
+@@ -2415,7 +2424,7 @@
+     pt.map = (Face**)buffer;
+     buffer += align8(sizeof(Face*) * (6 * N));
+     pt.horizon.indices = (int*)buffer;
+-    buffer += align8(sizeof(int) * 24);
++    buffer += align8(sizeof(int) * horizonCapacity(N));
+     pt.horizon.edges = (int*)buffer;

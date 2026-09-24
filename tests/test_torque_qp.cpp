@@ -442,6 +442,7 @@ TEST(QpCoopController, CooperativeTransportClearsBarrierAndInserts)
   const SimConfig cfg = test::testConfig(
       {
           "controller.type=qp_coop",
+          "controller.torque_qp.reference_governor.mode=state_machine",
           "object_trajectory.type=waypoints",
           "simulation.contacts=false",
           "disturbances=[]",
@@ -522,6 +523,7 @@ TEST(QpCoopController, ReferenceGovernorWorksWithoutCollisionDamper)
       {
           "controller.type=qp_coop",
           "controller.torque_qp.collision_avoidance_enabled=false",
+          "controller.torque_qp.reference_governor.mode=state_machine",
           "object_trajectory.type=waypoints",
           "simulation.contacts=false",
           "disturbances=[]",

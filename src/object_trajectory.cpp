@@ -1,6 +1,7 @@
 #include "dual_arm/object_trajectory.hpp"
 
 #include "dual_arm/math_utils.hpp"
+#include "dual_arm/path_deformation.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -112,7 +113,53 @@ ObjectTrajectory::ObjectTrajectory(const ObjectTrajectoryConfig& cfg, const Pose
   t_end_ = t;
 }
 
+double ObjectTrajectory::endTime() const {
+  return deformation_ ? deformation_->executionTime(t_end_) : t_end_;
+}
+
 ObjectReference ObjectTrajectory::evaluate(double t) const {
+  if (!deformation_) return evaluateNominal(t);
+  // 变形 + 重新计时（公式见 path_deformation.hpp）
+  double tau, tau_dot, tau_ddot;
+  deformation_->timeMap(t, tau, tau_dot, tau_ddot);
+  ObjectReference ref = evaluateNominal(tau);
+  Vector3d d, d_prime, d_second;
+  deformation_->offset(tau, d, d_prime, d_second);
+  const Vector3d v_path = ref.twist.head<3>() + d_prime;
+  const Vector3d w_path = ref.twist.tail<3>();
+  const Vector3d alpha_nom = ref.accel.tail<3>();
+  ref.pose.p += d;
+  ref.accel.head<3>() = tau_dot * tau_dot * (ref.accel.head<3>() + d_second) + tau_ddot * v_path;
+  ref.accel.tail<3>() = tau_dot * tau_dot * ref.accel.tail<3>() + tau_ddot * w_path;
+  ref.twist.head<3>() = tau_dot * v_path;
+  ref.twist.tail<3>() = tau_dot * w_path;
+  if (deformation_->hasRotation()) {
+    // 姿态偏移（世界系左乘）：R = Exp(φ) R_nom，ω = τ̇ (J_l(φ) φ' + Exp(φ) ω_nom)；
+    // α ≈ τ̈ (·) + τ̇² (J_l φ'' + [J_l φ']× Exp(φ) ω_nom + Exp(φ) α_nom)（忽略 dJ_l/dτ，属二阶小量）
+    Vector3d phi, phi_prime, phi_second;
+    deformation_->rotationOffset(tau, phi, phi_prime, phi_second);
+    const double angle = phi.norm();
+    Matrix3d Rphi = Matrix3d::Identity();
+    Matrix3d Jl = Matrix3d::Identity();
+    if (angle > 1e-12) {
+      const Vector3d axis = phi / angle;
+      Rphi = Eigen::AngleAxisd(angle, axis).toRotationMatrix();
+      const Matrix3d K = skew(phi);
+      Jl += (1.0 - std::cos(angle)) / (angle * angle) * K + (angle - std::sin(angle)) / (angle * angle * angle) * K * K;
+    }
+    const Vector3d w_offset = Jl * phi_prime;
+    const Vector3d w_total = w_offset + Rphi * w_path;  // w_path：名义角速度（对 τ）
+    ref.pose.q = (Quaterniond(Rphi) * ref.pose.q).normalized();
+    ref.twist.tail<3>() = tau_dot * w_total;
+    ref.accel.tail<3>() = tau_ddot * w_total +
+                          tau_dot * tau_dot * (Jl * phi_second + w_offset.cross(Rphi * w_path) + Rphi * alpha_nom);
+  }
+  ref.screw_accel = tau_dot * tau_dot * ref.screw_accel + tau_ddot * ref.screw_rate;
+  ref.screw_rate *= tau_dot;
+  return ref;
+}
+
+ObjectReference ObjectTrajectory::evaluateNominal(double t) const {
   ObjectReference ref;
   ref.pose = p0_;
 

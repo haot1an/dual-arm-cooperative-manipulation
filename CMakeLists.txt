@@ -75,6 +75,14 @@ add_library(dual_arm_core
   src/torque_qp.cpp
   src/qp_coop_controller.cpp
   src/qp_asym_coop_controller.cpp
+  src/grasp_alignment.cpp
+  src/cbf_reference_filter.cpp
+  src/small_qp.cpp
+  src/sparse_qp.cpp
+  src/path_deformation.cpp
+  src/closed_chain_ik.cpp
+  src/trajectory_planner.cpp
+  src/trajectory_optimizer.cpp
   src/logger.cpp
 )
 target_include_directories(dual_arm_core PUBLIC
@@ -116,6 +124,16 @@ endif()
 # 把 run_sim 放在 build/ 根目录，方便 ./build/run_sim
 set_target_properties(run_sim PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
 
+# 独立接触夹取实验：四个可动手指、摩擦接触、物体无 weld。
+add_executable(run_contact_grasp apps/run_contact_grasp.cpp)
+target_link_libraries(run_contact_grasp PRIVATE dual_arm_core)
+target_compile_options(run_contact_grasp PRIVATE ${DUAL_ARM_WARNINGS})
+if(DUAL_ARM_BUILD_VIEWER)
+  target_link_libraries(run_contact_grasp PRIVATE dual_arm_viewer)
+  target_compile_definitions(run_contact_grasp PRIVATE DUAL_ARM_HAS_VIEWER=1)
+endif()
+set_target_properties(run_contact_grasp PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
+
 # 离线工具（tools/*.py）通过 ctypes 调用的 MuJoCo 小接口：与仿真用同一个 MuJoCo 版本
 add_library(dual_arm_mjshim SHARED tools/mjshim.cpp)
 target_link_libraries(dual_arm_mjshim PRIVATE mujoco::mujoco)
@@ -142,6 +160,8 @@ if(DUAL_ARM_BUILD_TESTS)
     tests/test_scenes.cpp
     tests/test_trajectory.cpp
     tests/test_torque_qp.cpp
+    tests/test_cbf_reference_filter.cpp
+    tests/test_trajectory_planner.cpp
   )
   target_link_libraries(dual_arm_tests PRIVATE dual_arm_core GTest::gtest_main)
   target_compile_options(dual_arm_tests PRIVATE ${DUAL_ARM_WARNINGS})
@@ -152,6 +172,22 @@ if(DUAL_ARM_BUILD_TESTS)
   target_link_libraries(test_no_alloc PRIVATE dual_arm_core GTest::gtest_main)
   target_compile_options(test_no_alloc PRIVATE ${DUAL_ARM_WARNINGS})
   gtest_discover_tests(test_no_alloc DISCOVERY_TIMEOUT 60)
+
+  add_test(NAME ContactGrasp.PhysicalLift COMMAND run_contact_grasp --headless --check)
+  add_test(NAME ContactGrasp.SlotInsertion
+    COMMAND run_sim --scene slot --controller qp_coop --contact-grasp --check-contact --headless --no-log --duration 19)
+  add_test(NAME ContactGrasp.SlotAvoidance
+    COMMAND run_sim --scene slot_avoid --controller qp_coop --contact-grasp --check-contact --headless --no-log
+            --duration 24 --set "disturbances=[]")
+  add_test(NAME ContactGrasp.SlotGatePlanned
+    COMMAND run_sim --scene slot_gate --controller qp_coop --contact-grasp --check-contact --headless --no-log
+            --duration 24 --set "disturbances=[]")
+  add_test(NAME ContactGrasp.SlotGateModelErrorWithCbf
+    COMMAND run_sim --scene slot_gate --controller qp_coop --contact-grasp --check-contact --headless --no-log
+            --duration 16 --set "disturbances=[]" --set planner.model_error_body=gate
+            --set "planner.model_error_offset=[0,0,0.03]")
+  add_test(NAME ContactGrasp.ScrewAssembly
+    COMMAND run_sim --scene assembly --controller qp_asym_coop --contact-grasp --check-contact --headless --no-log --duration 21)
 
   if(DUAL_ARM_WITH_OSQP)
     add_executable(test_osqp_smoke tests/test_osqp_smoke.cpp)

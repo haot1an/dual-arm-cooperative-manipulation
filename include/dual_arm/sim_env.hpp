@@ -93,6 +93,19 @@ class SimEnv {
    *      3 维并不是世界系力矩——因此这里用 Jᵀf 换算，而不是直接读 efc_force。
    */
   Wrench weldWrench(Arm a) const;
+  /// contact_grasp 模式下指定手指对被抓 body 的总法向接触力 [N]；weld 模式返回 0。
+  double fingerContactNormal(Arm a, int finger) const;
+  double fingerContactTangent(Arm a, int finger) const;
+  double fingerContactMu(Arm a, int finger) const;
+  /// contact_grasp 模式下当前手指开度 [m]。
+  double fingerOpening(Arm a, int finger) const;
+  /// 接触模式下指定臂的夹指目标开度 [m]；负值恢复全开（0.04 m）。
+  void setFingerTarget(Arm a, double opening);
+  /// 接触模式：下次 reset() 时两臂的起始构型（预抓取）；工具仍按 scene q_init 的抓取构型摆放。
+  void setStartConfiguration(const std::array<Vector7d, kNumArms>& q);
+  /// 接触模式：撤除把主物体固定在世界系的临时托持工装（抓取完成后调用）。
+  void releaseStaging();
+  bool stagingActive() const;
   /// 任一 weld（equality id）对 body（必须带 free joint）施加的 wrench：世界系，参考点 = body 原点
   Wrench constraintWrenchOnBody(int eq_id, int body) const;
   /// 主物体位姿与 twist（参考点 = 物体中心，世界系）
@@ -124,6 +137,7 @@ class SimEnv {
   int weldFirstRow(int eq) const;
   void readKinematics(DualArmState& s) const;
   void readForces(DualArmState& s) const;
+  void updateFingerContacts();
 
   SimConfig cfg_;
   std::shared_ptr<SceneSpec> scene_;
@@ -133,6 +147,16 @@ class SimEnv {
   std::array<Pose, kNumArms> base_true_;
   std::array<Vector7d, kNumArms> tau_limit_;
   std::array<Vector6d, kNumArms> init_mismatch_;
+  std::array<std::array<int, 2>, kNumArms> finger_qpos_{{{-1, -1}, {-1, -1}}};
+  std::array<std::array<int, 2>, kNumArms> finger_act_{{{-1, -1}, {-1, -1}}};
+  std::array<std::array<int, 2>, kNumArms> finger_body_{{{-1, -1}, {-1, -1}}};
+  std::array<std::array<double, 2>, kNumArms> finger_normal_{};
+  std::array<std::array<double, 2>, kNumArms> finger_tangent_{};
+  std::array<std::array<double, 2>, kNumArms> finger_mu_{};
+  std::array<double, kNumArms> finger_target_override_{{-1.0, -1.0}};
+  std::array<Vector7d, kNumArms> start_q_{};
+  bool start_q_set_ = false;
+  int staging_eq_ = -1;
   std::vector<int> dist_body_;      ///< 每条扰动作用的 body id
   double tau_seat_ = 0.0;           ///< 本步施加的螺钉座面阻力矩
   // 夹爪 weld 的 relpose：t=0 的实际值与名义值（nominal 模式下在两者之间过渡）

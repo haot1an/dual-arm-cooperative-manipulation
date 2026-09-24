@@ -27,8 +27,9 @@ namespace dual_arm
 
   AsymmetricCoopController::AsymmetricCoopController(std::shared_ptr<RobotModel> model,
                                                      std::shared_ptr<const ObjectTrajectory> trajectory,
-                                                     const AsymCoopConfig &params)
-      : Controller(std::move(model)), trajectory_(std::move(trajectory)), params_(params)
+                                                     const AsymCoopConfig &params, bool contact_grasp)
+      : Controller(std::move(model)), trajectory_(std::move(trajectory)), params_(params),
+        contact_grasp_(contact_grasp)
   {
     if (!trajectory_)
       throw std::invalid_argument("AsymmetricCoopController: trajectory is null");
@@ -354,8 +355,22 @@ namespace dual_arm
       break;
     }
     case Phase::Hold:
-      condition_start_time_ = -1.0;
+    {
+      // HOLD 不是锁存的“成功”标签：真实夹持可能滑移，必须持续检查
+      // 实际力矩和轴向预紧力，否则工具打滑后仍会误报完成。
+      const bool hold_lost =
+          measured_tightening_torque_ <
+              params_.tightening_torque - params_.completion_torque_tolerance ||
+          std::abs(measured_preload_ - params_.axial_preload_force) >
+              params_.completion_preload_tolerance;
+      if (contact_grasp_ && conditionHeld(hold_lost, params_.completion_hold_time))
+      {
+        enterPhase(Phase::TorqueTighten);
+        torque_angle_reference_ = state.screw.angle;
+      }
+      if (!contact_grasp_) condition_start_time_ = -1.0;
       break;
+    }
     }
 
     double torque_command = 0.0;

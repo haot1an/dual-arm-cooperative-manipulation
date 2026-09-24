@@ -14,6 +14,9 @@ simulation:
   duration: 10.0             # [s] 仿真时长；可视化模式下 <= 0 表示一直运行直到关闭窗口
   realtime: true             # 可视化模式下按实时速率推进（--headless 总是全速运行）
   contacts: true             # false：关闭所有接触（只保留 weld / 关节等约束），用于“纯闭链内力”实验
+  contact_grasp: false       # true：slot/slot_avoid/assembly 使用可动手指摩擦夹取；抓取 weld 关闭
+  contact_elliptic_cone: true      # 接触夹取：椭圆摩擦锥（金字塔锥在持续扭矩下手指绕圆柱柄蠕滑）
+  contact_noslip_iterations: 30    # 接触夹取：noslip 后处理迭代数，消除软约束摩擦的稳态滑移；0 关闭
 
 # 基座布局（三个场景共用，代码中不含任何布局假设）。
 # 两台 Panda 装在 0.75 m 高的台面上、靠近操作者一侧（y = 0），沿 x 左右分开，各自向内偏转，朝 −y 工作。
@@ -91,7 +94,9 @@ object_trajectory:
 
 # 距离查询（CollisionModel）：对场景 obstacles 中列出的 geom 对计算有符号距离与 ∂d/∂q
 collision:
-  margin: 0.20                   # [m] 距离小于它的 geom 对才会被报告（MuJoCo pair margin）
+  # [m] 距离小于它的 geom 对才会被报告（MuJoCo pair margin）。不要设到 0.2：MuJoCo 3.12 native CCD 在大 margin 下
+  # 对个别“网格 ~ 大盒子”对会段错误（slot_gate 仅用 CBF 时复现；0.15 及以下正常）。距离列在 margin 处截断。
+  margin: 0.12
   max_pairs: 1024                # geom 对数量上限（缓冲区预分配）
   # 查询耗时（单线程，本机）：lift ~0.15 ms、slot ~0.65 ms、assembly ~1.0 ms；threads: 4 时约 0.09 / 0.23 / 0.27 ms。
   # 1 kHz 控制环中每周期都查询时建议开线程池，或降低查询频率 / 减小 margin。
@@ -120,6 +125,25 @@ controller:
     nullspace_kp: 10.0
     nullspace_kd: 2.0
     internal_wrench_ramp_time: 0.5  # [s]
+    # 仅 contact_grasp：绕指垫法向的手部力矩在分配中的权重倍数（≥ 1；1 = 与 weld 相同的等权分配）。
+    # 平行夹爪只能靠摩擦传该方向扭矩，等权分配会把 ~92% 的俯仰力矩压到这个弱方向上。
+    contact_torsion_weight: 100.0
+  # 接触夹取的抓取对准（仅 simulation.contact_grasp）：两臂从预抓取位姿（抓取点沿 −z 退 approach_distance）出发，
+  # TCP 按 min-jerk 平移到“实测物体位姿 × 抓取点”，位姿/速度满足容差并保持后闭合手指，四指均有接触力后交给任务控制器。
+  grasp_alignment:
+    approach_time: 1.5                               # [s]
+    stiffness: [1500.0, 1500.0, 1500.0, 80.0, 80.0, 80.0]   # 笛卡尔阻抗 [N/m, N·m/rad]
+    damping:   [80.0, 80.0, 80.0, 6.0, 6.0, 6.0]
+    nullspace_kp: 10.0
+    nullspace_kd: 2.0
+    position_tolerance: 0.0015     # [m]
+    orientation_tolerance: 0.017   # [rad] ≈ 1°
+    speed_tolerance: 0.005         # [m/s]
+    align_hold_time: 0.1           # [s]
+    close_time: 0.5                # [s]
+    contact_force_min: 2.0         # [N] 每指
+    settle_time: 0.3               # [s]
+    timeout: 8.0                   # [s]
   asym_coop:
     holding_arm: left
 
@@ -188,9 +212,66 @@ controller:
       avoidance_offset: 0.15
       offset_speed: 0.12
       preferred_direction: [0.0, 0.0, 1.0]
+      # state_machine：NORMAL→LIFT→CROSS→DESCEND（上面 trigger/release/avoidance_offset/offset_speed/preferred_direction）
+      # cbf：连续偏移 δ + 虚拟时间 s 的 CBF 参考滤波（下面 cbf 段；公式见 docs/cbf_reference_governor.md）
+      mode: state_machine
+      cbf:
+        safe_distance: 0.010       # [m] h = d − d_s
+        alpha: 2.0                 # [1/s] ḣ ≥ −α h
+        offset_max: 0.20           # [m] ‖δ‖ 上限
+        offset_speed_max: 0.15     # [m/s] ‖δ̇‖∞ 上限
+        offset_accel_max: 0.6      # [m/s²] δ̇ 每周期变化率上限
+        time_rate_accel_max: 2.5   # [1/s] ṡ 每周期变化率上限；需 ≥ alpha（文档 §6）
+        return_gain: 1.5           # [1/s] δ̇_nom = −k_r δ（0.8 时越墙后回落拖尾约 3 s，2.5+ 反而因跟踪滞后变慢）
+        offset_weight: 1.0
+        time_rate_weight: 0.05     # 小 → 优先绕行而不是停下
+        escape_direction: [0.0, 0.0, 1.0]
+        escape_gain: 0.12          # [m/s]
+        escape_activation: 0.08    # [m]
     admm_rho: 1.0
     admm_max_iterations: 40
     admm_tolerance: 1.0e-5
+# 物体空间轨迹优化（docs/trajectory_planning.md）：任务开始前把名义轨迹变形成无碰撞路径，
+# 再按速度 / 加速度上限重新计时；执行时仍由 CBF 参考滤波与力矩 QP 兜底。场景文件可打开。
+planner:
+  enabled: false
+  knot_dt: 0.2               # [s] 节点间隔（名义轨迹时间）
+  pin_start: 1.0             # [s] 起始段偏移固定为 0
+  pin_end: 1.0               # [s] 结束段偏移固定为 0（插槽末段）
+  safety_margin: 0.010       # [m] 在各 pair 安全距离之上的规划裕量
+  activation_distance: 0.06  # [m] 进入线性化约束的距离范围
+  accel_weight: 1.0          # ∫‖δ̈‖² dt
+  offset_weight: 0.2         # ∫‖δ‖² dt
+  max_offset: 0.25           # [m]
+  max_iterations: 40
+  trust_region: 0.02         # [m]
+  min_trust_region: 1.0e-4   # [m]
+  penalty: 10.0              # 约束违反 ℓ1 罚系数初值
+  max_penalty: 1.0e5
+  max_speed: 0.12            # [m/s] 时间参数化上限
+  max_accel: 0.30            # [m/s²]
+  multi_start: true          # 名义初值不可行时，再从 下/上/−x/+x 四个鼓包初值各跑一次，取可行且代价最小者
+  initial_offset: 0.10       # [m] 鼓包初值幅值
+  initial_ramp: 1.0          # [s] 鼓包两侧余弦过渡
+  # lateral：只做侧向平移偏移 + 事后放慢；full：物体 SE(3) + 时间联合优化（以 lateral 的结果为初值）
+  formulation: lateral
+  # ---- 以下仅 full ----
+  rotation_axes: [1, 1, 1]      # 允许姿态偏移的世界系转轴（0/1）
+  max_rotation: 0.8             # [rad] 每个转轴的偏移上限
+  rotation_length: 0.3          # [m/rad] 转角 ↔ 长度尺度：姿态平滑权重 = accel_weight·L²
+  rotation_offset_weight: 0.05  # ∫‖φ‖²
+  time_weight: 0.1              # 总时长 [1/s]
+  time_smooth_weight: 5.0       # Σ(Δt_{i+1} − Δt_i)²
+  min_dt_ratio: 0.4             # Δt ∈ [0.4, 3.0] × 名义节点间隔
+  max_dt_ratio: 3.0
+  max_angular_speed: 0.6        # [rad/s]
+  joint_margin: 0.10            # [rad] 关节到限位的最小余量
+  joint_activation: 0.30        # [rad]
+  full_max_iterations: 60
+  # 实验用：规划器的环境模型误差（它以为该 body 在真实位置 + offset 处；执行层仍用真实位置）
+  model_error_body: ""
+  model_error_offset: [0.0, 0.0, 0.0]
+
 log:
   enabled: true
   dir: logs                      # 每次运行生成 logs/<YYYYmmdd_HHMMSS>_<scene>_<controller>[_calib]/

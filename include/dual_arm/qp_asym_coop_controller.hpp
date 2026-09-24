@@ -23,7 +23,8 @@ namespace dual_arm
         const AsymCoopConfig &asym_config,
         const TorqueQpConfig &qp_config,
         const CollisionConfig &collision_config,
-        double timestep);
+        double timestep,
+        bool contact_grasp = false);
 
     const char *name() const override { return "qp_asym_coop"; }
     void reset(const DualArmState &initial_state) override;
@@ -82,6 +83,7 @@ namespace dual_arm
     TorqueQpConfig qp_config_;
     std::unique_ptr<CollisionModel> collision_model_;
     double timestep_ = 0.001;
+    bool contact_grasp_ = false;
     JointSafetyTorqueQp qp_;
     Vector14d lower_bound_ = Vector14d::Zero();
     Vector14d upper_bound_ = Vector14d::Zero();

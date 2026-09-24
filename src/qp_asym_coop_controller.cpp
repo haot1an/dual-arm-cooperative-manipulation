@@ -14,11 +14,13 @@ namespace dual_arm
       const AsymCoopConfig &asym_config,
       const TorqueQpConfig &qp_config,
       const CollisionConfig &collision_config,
-      double timestep)
+      double timestep,
+      bool contact_grasp)
       : Controller(model),
-        nominal_controller_(model, std::move(trajectory), asym_config),
+        nominal_controller_(model, std::move(trajectory), asym_config, contact_grasp),
         qp_config_(qp_config),
         timestep_(timestep),
+        contact_grasp_(contact_grasp),
         qp_(qp_config)
   {
     if (!(timestep_ > 0.0))
@@ -191,16 +193,17 @@ namespace dual_arm
 
     Matrix6x14d acceleration_equality_matrix;
     acceleration_equality_matrix.noalias() =
-        constraint_projector *
-        relative_jacobian;
+        contact_grasp_ ? Matrix6x14d::Zero().eval()
+                       : (constraint_projector * relative_jacobian).eval();
 
     const Vector6d constrained_relative_velocity =
         constraint_projector *
         (relative_jacobian * velocity);
-    const Vector6d acceleration_equality_target =
-        -qp_config_.closed_chain_velocity_damping *
-            constrained_relative_velocity -
-        constraint_projector * relative_bias;
+    const Vector6d acceleration_equality_target = contact_grasp_
+        ? Vector6d::Zero().eval()
+        : (-qp_config_.closed_chain_velocity_damping *
+           constrained_relative_velocity -
+           constraint_projector * relative_bias).eval();
 
     JointSafetyTorqueQp::CollisionMatrix collision_matrix =
         JointSafetyTorqueQp::CollisionMatrix::Zero();

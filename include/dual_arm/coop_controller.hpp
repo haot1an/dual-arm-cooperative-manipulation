@@ -39,7 +39,7 @@ namespace dual_arm
   {
   public:
     CoopController(std::shared_ptr<RobotModel> model, std::shared_ptr<const ObjectTrajectory> trajectory,
-                   const CoopConfig &params);
+                   const CoopConfig &params, bool contact_grasp = false);
 
     const char *name() const override { return "coop"; }
     void reset(const DualArmState &initial_state) override;
@@ -52,6 +52,7 @@ namespace dual_arm
   private:
     std::shared_ptr<const ObjectTrajectory> trajectory_;
     CoopConfig params_;
+    bool contact_grasp_ = false;
 
     /// 根据当前物体位姿构造 G = [G_left, G_right]。
     Matrix6x12d makeGraspMatrix(
@@ -73,6 +74,9 @@ namespace dual_arm
 
     /// W：物体 wrench 在两臂之间进行加权分配的权重矩阵。
     Matrix12d load_weight_ = Matrix12d::Zero();
+
+    /// 本周期实际使用的 W；接触夹取时在 load_weight_ 上加重绕指垫法向的力矩项。
+    Matrix12d allocationWeight() const;
 
     std::array<Vector7d, kNumArms> q_init_; ///< 初始构型（可用于零空间姿态保持）
   };

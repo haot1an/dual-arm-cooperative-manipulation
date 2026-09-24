@@ -1,0 +1,89 @@
+name: slot_gate
+description: 双臂搬运长板，滚转后从低矮横梁下方穿过并插入窄槽（轨迹规划对比场景）
+model: models/scene_slot_gate.xml
+
+object:
+  body: plate
+  geom: plate_geom
+
+grasps:
+  # contact_depth：接触模式下抓取点再向板内 15 mm（TCP 距端面 25 mm，指垫完整压在板上，手掌离端面 12 mm）
+  left:  {site: grasp_L, weld: weld_L, finger_opening: 0.011, contact_depth: 0.015}
+  right: {site: grasp_R, weld: weld_R, finger_opening: 0.011, contact_depth: 0.015}
+
+constraints:
+  - {name: weld_L, type: rigid, body1: left_hand, body2: plate, relative_dof: 0}
+  - {name: weld_R, type: rigid, body1: right_hand, body2: plate, relative_dof: 0}
+
+obstacles:
+  pairs:
+    - [left_arm, right_arm]
+    - [left_arm, table_top]
+    - [right_arm, table_top]
+    - [left_arm, gate]
+    - [right_arm, gate]
+    - [object, gate]
+    - [left_arm, slot_frame]
+    - [right_arm, slot_frame]
+    - [left_arm, riser]
+    - [right_arm, riser]
+    - {a: object, b: slot_frame, safe_distance: 0.001}
+    - {a: object, b: riser, safe_distance: 0.001}
+
+# 原始任务轨迹不包含越墙航点；reference governor 根据实时距离自主插入抬升偏置。
+# 在 y = −0.35 滚转（横梁在 y ∈ [−0.48, −0.45]），之后沿 −y 平移到插槽上方。
+# 名义路径在 z = 1.131 平移，竖直板顶 1.231 比横梁底面 1.17 高 6 cm：直接执行会正面撞上横梁；
+# 须先下压约 8 cm 从横梁下方穿过，再在约 5 cm 的平移内抬回槽壁以上。滚转时扫掠的板角也离横梁底面很近，规划会顺带下压。
+waypoints:
+  - {name: grasp,       pos: [0.0, -0.4500, 0.8760], rpy_deg: [0, 0, 0]}
+  - {name: lifted,      pos: [0.0, -0.3500, 1.1310], rpy_deg: [0, 0, 0]}
+  - {name: rolled,      pos: [0.0, -0.3500, 1.1310], rpy_deg: [-90, 0, 0]}
+  - {name: pre_insert,  pos: [0.0, -0.6500, 1.1310], rpy_deg: [-90, 0, 0]}
+  - {name: inserted,    pos: [0.0, -0.6500, 1.0510], rpy_deg: [-90, 0, 0]}
+
+cameras: [cam_iso, cam_front, cam_side]  # cam_side：斜侧视，看清穿梁与滚转
+
+slot:
+  width: 0.04
+  depth: 0.05
+  mouth_z: 1.0000
+  center_y: -0.6500
+  roll_axis: [1, 0, 0]
+  roll_deg: -90
+
+q_init:
+  left:  [0.821260, 0.609877, -0.273083, -2.244896, -1.206165, 1.611843, -1.123575]
+  right: [-0.871891, 0.618396, 0.323701, -2.246911, 1.187778, 1.636811, -0.439111]
+
+overrides:
+  object_trajectory:
+    waypoints:
+      v_max: 0.08
+      a_max: 0.20
+  controller:
+    torque_qp:
+      collision_max_approach_speed: 0.30
+      admm_max_iterations: 80
+      reference_governor:
+        enabled: true
+        obstacle_group: object~gate
+        trigger_distance: 0.08
+        release_distance: 0.03
+        avoidance_offset: 0.15
+        offset_speed: 0.12
+        preferred_direction: [0.0, 0.0, 1.0]
+        # cbf：连续偏移 + 虚拟时间的 CBF 参考滤波（docs/cbf_reference_governor.md）；
+        # state_machine：原 NORMAL→LIFT→CROSS→DESCEND（上面 trigger/release/avoidance_offset 等只用于它）
+        mode: cbf
+        cbf:
+          # 有全局规划时 CBF 只做安全滤波、不主动绕行（逃逸方向 +z 在此场景是错的方向）。
+          # 对比“只用 CBF 避障”：--set planner.enabled=false --set controller.torque_qp.reference_governor.cbf.escape_gain=0.12
+          escape_gain: 0.0
+  # 轨迹规划（docs/trajectory_planning.md）：任务开始前把名义路径变形为从横梁下方通过；--set planner.enabled=false 可对比只用 CBF
+  planner:
+    enabled: true
+    # 物体 SE(3) + 时间联合优化（docs/trajectory_planning.md §10）：以只平移规划为初值，另试“推迟滚转”初值。
+    # 只开放绕 x（板长轴 / 两手连线）的姿态偏移；滚转本身是 90°，所以上限取 1.7 rad。
+    formulation: full
+    rotation_axes: [1, 0, 0]
+    max_rotation: 1.7

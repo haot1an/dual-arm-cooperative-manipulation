@@ -162,6 +162,11 @@ namespace dual_arm
         {
           throw std::runtime_error("finger_opening must be in [0, 0.04] m (Franka Hand)");
         }
+        gs.contact_depth = readScalar<double>(g, "contact_depth", gs.contact_depth);
+        gs.contact_squeeze = readScalar<double>(g, "contact_squeeze", gs.contact_squeeze);
+        gs.approach_distance = readScalar<double>(g, "approach_distance", gs.approach_distance);
+        if (gs.contact_squeeze < 0.0 || !(gs.approach_distance > 0.0))
+          throw std::runtime_error("grasp contact_squeeze must be >= 0 and approach_distance > 0");
       }
 
       spec.constraints.clear();
@@ -360,6 +365,16 @@ namespace dual_arm
       cfg.duration = readScalar<double>(sim, "duration", cfg.duration);
       cfg.realtime = readScalar<bool>(sim, "realtime", cfg.realtime);
       cfg.contacts = readScalar<bool>(sim, "contacts", cfg.contacts);
+      cfg.contact_grasp = readScalar<bool>(sim, "contact_grasp", cfg.contact_grasp);
+      cfg.contact_elliptic_cone = readScalar<bool>(sim, "contact_elliptic_cone", cfg.contact_elliptic_cone);
+      cfg.contact_noslip_iterations = readScalar<int>(sim, "contact_noslip_iterations", cfg.contact_noslip_iterations);
+      if (cfg.contact_noslip_iterations < 0)
+        throw std::runtime_error("simulation.contact_noslip_iterations must be >= 0");
+      if (cfg.contact_grasp && !cfg.contacts)
+        throw std::runtime_error("simulation.contact_grasp requires simulation.contacts=true");
+      if (cfg.contact_grasp && cfg.scene.name != "slot" && cfg.scene.name != "slot_avoid" &&
+          cfg.scene.name != "slot_gate" && cfg.scene.name != "assembly")
+        throw std::runtime_error("simulation.contact_grasp currently supports only slot, slot_avoid, slot_gate and assembly");
 
       const YAML::Node layout = root["layout"];
       if (!layout)
@@ -491,6 +506,61 @@ namespace dual_arm
       cfg.collision.margin = readScalar<double>(root["collision"], "margin", cfg.collision.margin);
       cfg.collision.max_pairs = readScalar<int>(root["collision"], "max_pairs", cfg.collision.max_pairs);
       cfg.collision.threads = readScalar<int>(root["collision"], "threads", cfg.collision.threads);
+      if (const YAML::Node pl = root["planner"])
+      {
+        auto &c = cfg.planner;
+        c.enabled = readScalar<bool>(pl, "enabled", c.enabled);
+        c.knot_dt = readScalar<double>(pl, "knot_dt", c.knot_dt);
+        c.pin_start = readScalar<double>(pl, "pin_start", c.pin_start);
+        c.pin_end = readScalar<double>(pl, "pin_end", c.pin_end);
+        c.safety_margin = readScalar<double>(pl, "safety_margin", c.safety_margin);
+        c.activation_distance = readScalar<double>(pl, "activation_distance", c.activation_distance);
+        c.accel_weight = readScalar<double>(pl, "accel_weight", c.accel_weight);
+        c.offset_weight = readScalar<double>(pl, "offset_weight", c.offset_weight);
+        c.max_offset = readScalar<double>(pl, "max_offset", c.max_offset);
+        c.max_iterations = readScalar<int>(pl, "max_iterations", c.max_iterations);
+        c.trust_region = readScalar<double>(pl, "trust_region", c.trust_region);
+        c.min_trust_region = readScalar<double>(pl, "min_trust_region", c.min_trust_region);
+        c.penalty = readScalar<double>(pl, "penalty", c.penalty);
+        c.max_penalty = readScalar<double>(pl, "max_penalty", c.max_penalty);
+        c.max_speed = readScalar<double>(pl, "max_speed", c.max_speed);
+        c.max_accel = readScalar<double>(pl, "max_accel", c.max_accel);
+        c.multi_start = readScalar<bool>(pl, "multi_start", c.multi_start);
+        c.initial_offset = readScalar<double>(pl, "initial_offset", c.initial_offset);
+        c.initial_ramp = readScalar<double>(pl, "initial_ramp", c.initial_ramp);
+        const std::string formulation = readScalar<std::string>(pl, "formulation", "lateral");
+        if (formulation == "lateral")
+          c.formulation = PlannerConfig::Formulation::Lateral;
+        else if (formulation == "full")
+          c.formulation = PlannerConfig::Formulation::Full;
+        else
+          throw std::runtime_error("planner.formulation must be lateral or full");
+        c.rotation_axes = readVec<3>(pl, "rotation_axes", c.rotation_axes);
+        c.max_rotation = readScalar<double>(pl, "max_rotation", c.max_rotation);
+        c.rotation_length = readScalar<double>(pl, "rotation_length", c.rotation_length);
+        c.rotation_offset_weight = readScalar<double>(pl, "rotation_offset_weight", c.rotation_offset_weight);
+        c.time_weight = readScalar<double>(pl, "time_weight", c.time_weight);
+        c.time_smooth_weight = readScalar<double>(pl, "time_smooth_weight", c.time_smooth_weight);
+        c.min_dt_ratio = readScalar<double>(pl, "min_dt_ratio", c.min_dt_ratio);
+        c.max_dt_ratio = readScalar<double>(pl, "max_dt_ratio", c.max_dt_ratio);
+        c.max_angular_speed = readScalar<double>(pl, "max_angular_speed", c.max_angular_speed);
+        c.joint_margin = readScalar<double>(pl, "joint_margin", c.joint_margin);
+        c.joint_activation = readScalar<double>(pl, "joint_activation", c.joint_activation);
+        c.full_max_iterations = readScalar<int>(pl, "full_max_iterations", c.full_max_iterations);
+        c.model_error_body = readScalar<std::string>(pl, "model_error_body", c.model_error_body);
+        c.model_error_offset = readVec<3>(pl, "model_error_offset", c.model_error_offset);
+        if (!(c.max_rotation > 0.0) || !(c.rotation_length > 0.0) || c.rotation_offset_weight < 0.0 ||
+            c.time_weight < 0.0 || c.time_smooth_weight < 0.0 || !(c.min_dt_ratio > 0.0) ||
+            !(c.max_dt_ratio > c.min_dt_ratio) || !(c.max_angular_speed > 0.0) || c.joint_margin < 0.0 ||
+            !(c.joint_activation > c.joint_margin) || c.full_max_iterations < 1)
+          throw std::runtime_error("planner (full formulation) parameters are invalid");
+        if (!(c.knot_dt > 0.0) || c.pin_start < 0.0 || c.pin_end < 0.0 || c.safety_margin < 0.0 ||
+            !(c.activation_distance > 0.0) || !(c.accel_weight > 0.0) || c.offset_weight < 0.0 ||
+            !(c.max_offset > 0.0) || c.max_iterations < 1 || !(c.trust_region > 0.0) ||
+            !(c.min_trust_region > 0.0) || !(c.penalty > 0.0) || c.max_penalty < c.penalty ||
+            !(c.max_speed > 0.0) || !(c.max_accel > 0.0) || c.initial_offset < 0.0 || !(c.initial_ramp > 0.0))
+          throw std::runtime_error("planner parameters are invalid");
+      }
 
       const YAML::Node ctrl = root["controller"];
       cfg.controller = readScalar<std::string>(ctrl, "type", cfg.controller);
@@ -542,6 +612,28 @@ namespace dual_arm
               "cartesian_impedance.load_share_left must be in (0, 1)");
         }
       }
+      if (const YAML::Node ga = ctrl["grasp_alignment"])
+      {
+        auto &c = cfg.grasp_alignment;
+        c.approach_time = readScalar<double>(ga, "approach_time", c.approach_time);
+        c.stiffness = readVec<6>(ga, "stiffness", c.stiffness);
+        c.damping = readVec<6>(ga, "damping", c.damping);
+        c.nullspace_kp = readScalar<double>(ga, "nullspace_kp", c.nullspace_kp);
+        c.nullspace_kd = readScalar<double>(ga, "nullspace_kd", c.nullspace_kd);
+        c.position_tolerance = readScalar<double>(ga, "position_tolerance", c.position_tolerance);
+        c.orientation_tolerance = readScalar<double>(ga, "orientation_tolerance", c.orientation_tolerance);
+        c.speed_tolerance = readScalar<double>(ga, "speed_tolerance", c.speed_tolerance);
+        c.align_hold_time = readScalar<double>(ga, "align_hold_time", c.align_hold_time);
+        c.close_time = readScalar<double>(ga, "close_time", c.close_time);
+        c.contact_force_min = readScalar<double>(ga, "contact_force_min", c.contact_force_min);
+        c.settle_time = readScalar<double>(ga, "settle_time", c.settle_time);
+        c.timeout = readScalar<double>(ga, "timeout", c.timeout);
+        if (!(c.approach_time > 0.0) || !(c.close_time > 0.0) || !(c.timeout > 0.0) ||
+            (c.stiffness.array() < 0.0).any() || (c.damping.array() < 0.0).any() ||
+            c.position_tolerance <= 0.0 || c.orientation_tolerance <= 0.0 || c.speed_tolerance <= 0.0 ||
+            c.align_hold_time < 0.0 || c.settle_time < 0.0 || c.contact_force_min < 0.0)
+          throw std::runtime_error("controller.grasp_alignment parameters are invalid");
+      }
       if (const YAML::Node cp = ctrl["coop"])
       {
         auto &c = cfg.coop;
@@ -557,6 +649,10 @@ namespace dual_arm
         c.load_share_left = readScalar<double>(cp, "load_share_left", c.load_share_left);
         c.nullspace_kp = readScalar<double>(cp, "nullspace_kp", c.nullspace_kp);
         c.nullspace_kd = readScalar<double>(cp, "nullspace_kd", c.nullspace_kd);
+        c.contact_torsion_weight =
+            readScalar<double>(cp, "contact_torsion_weight", c.contact_torsion_weight);
+        if (!(c.contact_torsion_weight >= 1.0))
+          throw std::runtime_error("coop.contact_torsion_weight must be >= 1");
         if (c.internal_force_gain < 0.0)
         {
           throw std::runtime_error(
@@ -761,6 +857,35 @@ namespace dual_arm
               readScalar<double>(rg, "offset_speed", g.offset_speed);
           g.preferred_direction =
               readVec<3>(rg, "preferred_direction", g.preferred_direction);
+          const std::string governor_mode = readScalar<std::string>(rg, "mode", "state_machine");
+          if (governor_mode == "state_machine")
+            g.mode = TorqueQpConfig::ReferenceGovernorConfig::Mode::StateMachine;
+          else if (governor_mode == "cbf")
+            g.mode = TorqueQpConfig::ReferenceGovernorConfig::Mode::Cbf;
+          else
+            throw std::runtime_error("torque_qp.reference_governor.mode must be state_machine or cbf");
+          if (const YAML::Node cb = rg["cbf"])
+          {
+            auto &cb_cfg = g.cbf;
+            cb_cfg.safe_distance = readScalar<double>(cb, "safe_distance", cb_cfg.safe_distance);
+            cb_cfg.alpha = readScalar<double>(cb, "alpha", cb_cfg.alpha);
+            cb_cfg.offset_max = readScalar<double>(cb, "offset_max", cb_cfg.offset_max);
+            cb_cfg.offset_speed_max = readScalar<double>(cb, "offset_speed_max", cb_cfg.offset_speed_max);
+            cb_cfg.offset_accel_max = readScalar<double>(cb, "offset_accel_max", cb_cfg.offset_accel_max);
+            cb_cfg.time_rate_accel_max = readScalar<double>(cb, "time_rate_accel_max", cb_cfg.time_rate_accel_max);
+            cb_cfg.return_gain = readScalar<double>(cb, "return_gain", cb_cfg.return_gain);
+            cb_cfg.offset_weight = readScalar<double>(cb, "offset_weight", cb_cfg.offset_weight);
+            cb_cfg.time_rate_weight = readScalar<double>(cb, "time_rate_weight", cb_cfg.time_rate_weight);
+            cb_cfg.escape_direction = readVec<3>(cb, "escape_direction", cb_cfg.escape_direction);
+            cb_cfg.escape_gain = readScalar<double>(cb, "escape_gain", cb_cfg.escape_gain);
+            cb_cfg.escape_activation = readScalar<double>(cb, "escape_activation", cb_cfg.escape_activation);
+            if (cb_cfg.safe_distance < 0.0 || !(cb_cfg.alpha > 0.0) || !(cb_cfg.offset_max > 0.0) ||
+                !(cb_cfg.offset_speed_max > 0.0) || !(cb_cfg.offset_accel_max > 0.0) || !(cb_cfg.time_rate_accel_max > 0.0) ||
+                cb_cfg.return_gain < 0.0 || !(cb_cfg.offset_weight > 0.0) || !(cb_cfg.time_rate_weight > 0.0) ||
+                cb_cfg.escape_gain < 0.0 || cb_cfg.escape_activation < 0.0 || cb_cfg.escape_direction.norm() < 1e-9)
+              throw std::runtime_error("torque_qp.reference_governor.cbf parameters are invalid");
+            cb_cfg.escape_direction.normalize();
+          }
           if (g.enabled &&
               (g.obstacle_group.empty() ||
                !(g.trigger_distance > 0.0) ||
@@ -817,6 +942,8 @@ namespace dual_arm
                    "[config] warning: weld.solref timeconst %.4g < 2*timestep; MuJoCo will clamp it\n",
                    cfg.weld.solref[0]);
     }
+
+    cfg.scene.contact_grasp = cfg.contact_grasp;
 
     YAML::Node effective = YAML::Clone(root);
     effective["scene_spec"] = YAML::Clone(scene_yaml);

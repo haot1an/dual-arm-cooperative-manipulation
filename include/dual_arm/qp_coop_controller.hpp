@@ -7,6 +7,7 @@
  * JointSafetyTorqueQp 统一执行力矩、关节状态、六维刚性闭链和距离约束。
  * 适用于 lift、slot 等两手相对自由度为 0 的刚性协同搬运场景。
  */
+#include "dual_arm/cbf_reference_filter.hpp"
 #include "dual_arm/collision_model.hpp"
 #include "dual_arm/coop_controller.hpp"
 #include "dual_arm/torque_qp.hpp"
@@ -23,6 +24,7 @@ public:
     Lift = 1,
     Cross = 2,
     Descend = 3,
+    Cbf = 4,  ///< mode = cbf 且偏移或时间缩放在起作用
   };
 
   QpCoopController(
@@ -31,7 +33,8 @@ public:
       const CoopConfig& coop_config,
       const TorqueQpConfig& qp_config,
       const CollisionConfig& collision_config,
-      double timestep);
+      double timestep,
+      bool contact_grasp = false);
 
   const char* name() const override { return "qp_coop"; }
   void reset(const DualArmState& initial_state) override;
@@ -55,6 +58,8 @@ public:
   double governorOffset() const { return governor_offset_; }
   double governorVirtualTime() const { return governor_virtual_time_; }
   const ObjectReference& governedReference() const { return governed_reference_; }
+  /// mode = cbf 时的参考滤波器（否则为 nullptr）
+  const CbfReferenceFilter* cbfFilter() const { return cbf_filter_.get(); }
   static const char* governorPhaseName(GovernorPhase phase);
   const Vector14d& torqueLowerBound() const { return lower_bound_; }
   const Vector14d& torqueUpperBound() const { return upper_bound_; }
@@ -65,6 +70,7 @@ private:
   TorqueQpConfig qp_config_;
   std::unique_ptr<CollisionModel> collision_model_;
   double timestep_ = 0.001;
+  bool contact_grasp_ = false;
   JointSafetyTorqueQp qp_;
   Vector14d lower_bound_ = Vector14d::Zero();
   Vector14d upper_bound_ = Vector14d::Zero();
@@ -78,6 +84,10 @@ private:
   double governor_virtual_time_ = 0.0;
   Vector3d governor_entry_normal_ = Vector3d::Zero();
   ObjectReference governed_reference_;
+  std::unique_ptr<CbfReferenceFilter> cbf_filter_;
+
+  /// mode = cbf：从距离查询中取出 reference_governor.obstacle_group 的“物体 ~ 障碍”对，交给 CBF 滤波器。
+  void updateCbfGovernor(const DualArmState& state, const std::vector<DistanceInfo>* distances);
 };
 
 } // namespace dual_arm

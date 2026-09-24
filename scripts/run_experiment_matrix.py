@@ -77,6 +77,8 @@ def run_case(case: dict[str, Any], out: Path) -> tuple[Path, dict[str, Any]]:
         "--set", "simulation.contacts=false",
         "--set", "disturbances=[]",
         "--set", "log.decimation=5",
+        # 本矩阵研究的是状态机 governor 的消融；CBF 模式另见 acceptance 的 slot_avoid。
+        "--set", "controller.torque_qp.reference_governor.mode=state_machine",
     ]
     for override in case["overrides"]:
         command += ["--set", override]

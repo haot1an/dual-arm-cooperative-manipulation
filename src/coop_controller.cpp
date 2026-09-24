@@ -13,10 +13,12 @@ namespace dual_arm
   CoopController::CoopController(
       std::shared_ptr<RobotModel> model,
       std::shared_ptr<const ObjectTrajectory> trajectory,
-      const CoopConfig &params)
+      const CoopConfig &params,
+      bool contact_grasp)
       : Controller(std::move(model)),
         trajectory_(std::move(trajectory)),
-        params_(params)
+        params_(params),
+        contact_grasp_(contact_grasp)
   {
     if (!trajectory_)
     {
@@ -69,6 +71,28 @@ namespace dual_arm
 
     load_weight_.bottomRightCorner<6, 6>() =
         Matrix6d::Identity() / lambda_right;
+  }
+
+  Matrix12d CoopController::allocationWeight() const
+  {
+    if (!contact_grasp_)
+      return load_weight_;
+
+    // 摩擦夹持时，绕指垫法向 n（TCP 的 y 轴 = 手指开合方向）的手部力矩只能靠
+    // 接触斑内的摩擦传递（~μ·N·r，本场景 < 0.5 N·m）。等权 W 下，两手相距 2r 的物体
+    // 在该方向所需力矩约 1/(1+r²) ≈ 92% 被分给手部力矩，物体姿态实际上失控。
+    // 在该方向把力矩权重乘以 k：W_m,i = (I + (k−1) n nᵀ)/λ_i，最小加权范数解改由
+    // 两手的力差（力臂）产生这一分量。其余方向保持与 weld 基线相同的分配。
+    Matrix12d W = load_weight_;
+    const double extra = params_.contact_torsion_weight - 1.0;
+    for (Arm a : kArms)
+    {
+      const int i = armIndex(a);
+      const Vector3d n = model_->eePose(a).R().col(1);
+      W.block<3, 3>(6 * i + 3, 6 * i + 3) +=
+          extra * load_weight_(6 * i + 3, 6 * i + 3) * (n * n.transpose());
+    }
+    return W;
   }
 
   void CoopController::reset(
@@ -207,7 +231,7 @@ namespace dual_arm
             G,
             object_wrench,
             internal_wrench_command,
-            load_weight_);
+            allocationWeight());
 
     const Wrench left_hand_wrench =
         hand_wrench.head<6>();

@@ -61,7 +61,7 @@ def summarize(rows: list[dict[str, float]]) -> dict[str, float | int | list]:
     offsets = [row.get("governor_offset", 0.0) for row in rows]
     transitions = []
     previous = None
-    phase_names = ["NORMAL", "LIFT", "CROSS", "DESCEND"]
+    phase_names = ["NORMAL", "LIFT", "CROSS", "DESCEND", "CBF"]
     for row, phase in zip(rows, phases):
         if phase != previous:
             transitions.append(

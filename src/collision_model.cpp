@@ -11,6 +11,11 @@ CollisionModel::CollisionModel(const SceneSpec& scene, const std::array<Pose, kN
     : scene_(scene), margin_(cfg.margin) {
   const std::array<double, kNumArms> fingers{scene.grasp[0].finger_opening, scene.grasp[1].finger_opening};
   MjSpecPtr spec = loadSceneSpec(scene.model_path, base_poses, fingers, timestep);
+  for (const auto& [name, offset] : cfg.body_offsets) {
+    mjsBody* body = mjs_findBody(spec.get(), name.c_str());
+    if (!body) throw std::runtime_error("CollisionModel: body_offsets names unknown body '" + name + "'");
+    for (int k = 0; k < 3; ++k) body->pos[k] += offset[k];
+  }
 
   // 1) 给所有无名 geom 起名字（显式 pair 只能按名字引用）
   int geom_counter = 0;

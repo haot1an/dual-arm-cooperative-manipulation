@@ -24,14 +24,105 @@ std::array<double, kNumArms> fingerOpenings(const SceneSpec& s) {
 
 SimEnv::SimEnv(const SimConfig& cfg) : cfg_(cfg), scene_(std::make_shared<SceneSpec>(cfg.scene)) {
   for (Arm a : kArms) base_true_[armIndex(a)] = plantBasePose(cfg_, a);
-  model_ = loadSceneModel(scene_->model_path, base_true_, fingerOpenings(*scene_), cfg_.timestep);
+  if (cfg_.contact_grasp) {
+    auto spec = loadSceneSpec(scene_->model_path, base_true_, {-1.0, -1.0}, cfg_.timestep);
+    addContactGrippers(spec.get());
+    if (scene_->name == "assembly") {
+      // 平行夹爪绕指垫法向的抗扭只有 ~μ·N·r（接触斑半径 ~8 mm），远小于工件自重（偏心 0.1 m）
+      // 与 5 N 预紧（力臂 0.2 m）产生的 ~1.7 N·m 俯仰力矩；悬空工件会绕指垫转到远端撞上工装。
+      // 接触版在工装上加一块 10 mm 定位垫，让工件从一开始就平放在垫上（真实拧紧工位的做法），
+      // 俯仰由定位垫承担，偏航（拧紧反力矩）仍由左手夹持与垫面摩擦共同承担。
+      // 定位垫只在工件下方、远离左指（x < 0.05 m），控制器碰撞模型不必包含它。
+      mjsGeom* jig = mjs_addGeom(mjs_findBody(spec.get(), "world"), nullptr);
+      mjs_setName(jig->element, "contact_jig");
+      jig->type = mjGEOM_BOX;
+      jig->size[0] = 0.085;
+      jig->size[1] = 0.022;
+      jig->size[2] = 0.005;
+      jig->pos[0] = -0.04;
+      jig->pos[1] = -0.45;
+      jig->pos[2] = 0.855;
+      jig->friction[0] = 0.8;
+      jig->rgba[0] = 0.25f;
+      jig->rgba[1] = 0.45f;
+      jig->rgba[2] = 0.70f;
+      jig->rgba[3] = 1.0f;
+    }
+    // 临时托持工装：抓取建立前把主物体固定在世界系（相当于来料定位夹具），对准并夹紧后由 releaseStaging() 撤除。
+    // 不能用 hand↔物体 的抓取 weld 代替：接近过程中手在运动，会把物体一起拖走。
+    mjsEquality* staging = mjs_addEquality(spec.get(), nullptr);
+    mjs_setName(staging->element, "contact_staging");
+    staging->type = mjEQ_WELD;
+    staging->objtype = mjOBJ_BODY;
+    mjs_setString(staging->name1, "world");
+    mjs_setString(staging->name2, scene_->object.body.c_str());
+    // mjs_addEquality 的 data 默认是 joint 等式的 polycoef [0 1 0 …]，weld 会把它读成锚点 (0, 1, 0)；显式清零。
+    // relpose 在 reset() 中按物体当前位姿写入；data[10] = torquescale。
+    for (double& v : staging->data) v = 0.0;
+    staging->data[6] = 1.0;
+    staging->data[10] = 1.0;
+    staging->solref[0] = 0.004;
+    staging->solref[1] = 1.0;
+    enableFingerGraspContacts(spec.get(), *scene_);
+    model_ = compileSpec(spec.get(), scene_->model_path);
+  } else {
+    model_ = loadSceneModel(scene_->model_path, base_true_, fingerOpenings(*scene_), cfg_.timestep);
+  }
   data_ = MjDataPtr(mj_makeData(model_.get()));
   if (!data_) throw std::runtime_error("mj_makeData failed");
   completeSceneSpec(*scene_, model_.get());
   idx_ = findSceneIndices(model_.get(), *scene_);
+  if (cfg_.contact_grasp) {
+    // completeSceneSpec 已把 contact_depth 计入 site_in_body；同步 plant 中的 site，使可视化与
+    // TCP–抓取点误差统计看到同一个抓取点（控制器模型 / 碰撞模型经同一函数得到同一值）。
+    for (Arm a : kArms) {
+      const Pose& g = scene_->graspOf(a).site_in_body;
+      const int site = idx_[a].grasp_site;
+      for (int k = 0; k < 3; ++k) model_->site_pos[3 * site + k] = g.p[k];
+    }
+    staging_eq_ = mj_name2id(model_.get(), mjOBJ_EQUALITY, "contact_staging");
+    if (staging_eq_ < 0) throw std::runtime_error("contact staging weld missing");
+  }
+
+  if (cfg_.contact_grasp) {
+    for (Arm a : kArms) {
+      const int i = armIndex(a);
+      for (int f = 0; f < 2; ++f) {
+        const std::string base = std::string(armName(a)) + (f == 0 ? "_left_finger" : "_right_finger");
+        const int j = mj_name2id(model_.get(), mjOBJ_JOINT, (base + "_slide").c_str());
+        finger_body_[i][f] = mj_name2id(model_.get(), mjOBJ_BODY, base.c_str());
+        finger_act_[i][f] = mj_name2id(model_.get(), mjOBJ_ACTUATOR, (base + "_position").c_str());
+        if (j < 0 || finger_body_[i][f] < 0 || finger_act_[i][f] < 0)
+          throw std::runtime_error("contact gripper missing '" + base + "'");
+        finger_qpos_[i][f] = model_->jnt_qposadr[j];
+      }
+    }
+  }
 
   mjModel* m = model_.get();
   if (!cfg_.contacts) m->opt.disableflags |= mjDSBL_CONTACT;
+  if (cfg_.contact_grasp) {
+    // MuJoCo 的摩擦约束行没有位置项：持续切向载荷下软接触会以恒定速度蠕滑。
+    // 金字塔锥 + 圆柱柄拧紧时手相对工具可转过 100° 以上；椭圆锥 + noslip 把它压到 < 1°。
+    if (cfg_.contact_elliptic_cone) m->opt.cone = mjCONE_ELLIPTIC;
+    m->opt.noslip_iterations = cfg_.contact_noslip_iterations;
+  }
+  if (cfg_.contact_grasp) {
+    for (Arm a : kArms) {
+      for (int f = 0; f < 2; ++f) {
+        const int act = finger_act_[armIndex(a)][f];
+        m->actuator_gainprm[mjNGAIN * act] = 3000.0;
+        m->actuator_biasprm[mjNBIAS * act + 1] = -3000.0;
+      }
+    }
+    for (int g = 0; g < m->ngeom; ++g) {
+      for (Arm a : kArms) {
+        const auto& fingers = finger_body_[armIndex(a)];
+        if (m->geom_bodyid[g] == fingers[0] || m->geom_bodyid[g] == fingers[1])
+          m->geom_friction[3 * g] = 1.5;
+      }
+    }
+  }
   for (Arm a : kArms) {
     for (int j = 0; j < kArmDof; ++j) {
       const int act = idx_[a].actuator_id[j];
@@ -63,9 +154,16 @@ void SimEnv::reset() {
   const mjModel* m = model_.get();
   mjData* d = data_.get();
   mj_resetData(m, d);
+  finger_target_override_ = {-1.0, -1.0};
 
   for (Arm a : kArms) {
     for (int j = 0; j < kArmDof; ++j) d->qpos[idx_[a].qpos_adr + j] = scene_->q_init[armIndex(a)][j];
+    if (cfg_.contact_grasp) {
+      for (int f = 0; f < 2; ++f) {
+        d->qpos[finger_qpos_[armIndex(a)][f]] = 0.04;
+        d->ctrl[finger_act_[armIndex(a)][f]] = 0.04;
+      }
+    }
   }
   // 主物体放在第一个航点
   const Pose& T0 = scene_->waypoints.front().pose;
@@ -93,6 +191,12 @@ void SimEnv::reset() {
     qb[5] = T_body.q.y();
     qb[6] = T_body.q.z();
   }
+  // 接触模式：工具按抓取构型放好后，两臂移到预抓取构型（由抓取对准求出）
+  if (cfg_.contact_grasp && start_q_set_) {
+    for (Arm a : kArms) {
+      for (int j = 0; j < kArmDof; ++j) d->qpos[idx_[a].qpos_adr + j] = start_q_[armIndex(a)][j];
+    }
+  }
 
   mj_forward(m, d);
   for (Arm a : kArms) {
@@ -102,7 +206,15 @@ void SimEnv::reset() {
     init_mismatch_[armIndex(a)] = poseError(gs, es);
   }
   initWelds();
+  if (cfg_.contact_grasp) {
+    // hand↔物体 的抓取 weld 在接触 plant 中始终关闭；世界系临时托持工装锁住物体当前位姿。
+    for (Arm a : kArms) d->eq_active[idx_[a].weld_eq] = 0;
+    const Pose object = poseFromMjMat(d->xpos + 3 * idx_.object_body, d->xmat + 9 * idx_.object_body);
+    writeRelpose(staging_eq_, object.p, object.q);
+    d->eq_active[staging_eq_] = 1;
+  }
   mj_forward(m, d);
+  updateFingerContacts();
 
   tau_seat_ = 0.0;
   state_ = DualArmState{};
@@ -113,6 +225,7 @@ void SimEnv::reset() {
 
 void SimEnv::forward() {
   mj_forward(model_.get(), data_.get());
+  updateFingerContacts();
   readKinematics(state_);
   readForces(state_);
   last_step_ = state_;
@@ -215,7 +328,10 @@ void SimEnv::applyScrewSeatTorque() {
   const double pen = feed - p.seat_depth;
   // 座面贴合后，阻力矩随拧入深度线性增大（沿 +z，阻碍继续拧紧）；弹性的，松开时会推回
   tau_seat_ = pen > 0.0 ? std::min(p.seat_stiffness * pen, p.seat_torque_max) : 0.0;
-  d->qfrc_applied[idx_.screw.hinge_dof] = tau_seat_;
+  // 接触版装配使用自锁螺纹近似：座面只抵抗继续旋入，不在松手时
+  // 主动把螺钉和工具弹回。旧 weld 基线仍沿用弹性座面模型。
+  d->qfrc_applied[idx_.screw.hinge_dof] =
+      cfg_.contact_grasp && d->qvel[idx_.screw.hinge_dof] >= 0.0 ? 0.0 : tau_seat_;
 }
 
 void SimEnv::step(const Vector7d& tau_left, const Vector7d& tau_right) {
@@ -233,6 +349,11 @@ void SimEnv::step(const Vector7d& tau_left, const Vector7d& tau_right) {
       d->ctrl[idx_[a].actuator_id[j]] = tau[j];
     }
     last_step_.arm(a).tau = tau;
+    if (cfg_.contact_grasp) {
+      // 手指开度由抓取对准（GraspAlignment）经 setFingerTarget 指令；未指令时保持全开。
+      const double opening = finger_target_override_[armIndex(a)] >= 0.0 ? finger_target_override_[armIndex(a)] : 0.04;
+      for (int f = 0; f < 2; ++f) d->ctrl[finger_act_[armIndex(a)][f]] = opening;
+    }
   }
   updateWeldRamp(d->time);
   applyDisturbances(d->time);
@@ -242,6 +363,7 @@ void SimEnv::step(const Vector7d& tau_left, const Vector7d& tau_right) {
   // 加速度 / 约束力 / F/T（t 时刻）+ 积分到 t+dt
   mj_step2(m, d);
   readForces(last_step_);
+  updateFingerContacts();
 
   // t+dt 时刻的位置 / 速度相关量
   mj_step1(m, d);
@@ -423,6 +545,72 @@ Wrench SimEnv::weldWrench(Arm a) const {
   const mjData* d = data_.get();
   const Wrench w_origin = constraintWrenchOnBody(ai.weld_eq, ai.grasp_body);
   return shiftWrenchRefPoint(w_origin, vec3(d->xpos + 3 * ai.grasp_body), vec3(d->site_xpos + 3 * ai.grasp_site));
+}
+
+double SimEnv::fingerContactNormal(Arm a, int finger) const {
+  if (!cfg_.contact_grasp || finger < 0 || finger > 1) return 0.0;
+  return finger_normal_[armIndex(a)][finger];
+}
+
+double SimEnv::fingerContactTangent(Arm a, int finger) const {
+  if (!cfg_.contact_grasp || finger < 0 || finger > 1) return 0.0;
+  return finger_tangent_[armIndex(a)][finger];
+}
+
+double SimEnv::fingerContactMu(Arm a, int finger) const {
+  if (!cfg_.contact_grasp || finger < 0 || finger > 1) return 0.0;
+  return finger_mu_[armIndex(a)][finger];
+}
+
+void SimEnv::updateFingerContacts() {
+  for (auto& arm : finger_normal_) arm = {0.0, 0.0};
+  for (auto& arm : finger_tangent_) arm = {0.0, 0.0};
+  for (auto& arm : finger_mu_) arm = {0.0, 0.0};
+  if (!cfg_.contact_grasp) return;
+  const mjModel* m = model_.get();
+  const mjData* d = data_.get();
+  for (int c = 0; c < d->ncon; ++c) {
+    const mjContact& contact = d->contact[c];
+    if (contact.efc_address < 0) continue;
+    const int b1 = m->geom_bodyid[contact.geom[0]];
+    const int b2 = m->geom_bodyid[contact.geom[1]];
+    for (Arm a : kArms) {
+      const int target = idx_[a].grasp_body;
+      for (int f = 0; f < 2; ++f) {
+        const int fb = finger_body_[armIndex(a)][f];
+        if (!((b1 == fb && b2 == target) || (b2 == fb && b1 == target))) continue;
+        mjtNum wrench[6];
+        mj_contactForce(m, d, c, wrench);
+        finger_normal_[armIndex(a)][f] += std::abs(wrench[0]);
+        finger_tangent_[armIndex(a)][f] += std::hypot(wrench[1], wrench[2]);
+        finger_mu_[armIndex(a)][f] = std::max(finger_mu_[armIndex(a)][f], contact.friction[0]);
+      }
+    }
+  }
+}
+
+double SimEnv::fingerOpening(Arm a, int finger) const {
+  if (!cfg_.contact_grasp || finger < 0 || finger > 1) return 0.0;
+  return data_->qpos[finger_qpos_[armIndex(a)][finger]];
+}
+
+void SimEnv::setStartConfiguration(const std::array<Vector7d, kNumArms>& q) {
+  start_q_ = q;
+  start_q_set_ = true;
+}
+
+void SimEnv::releaseStaging() {
+  if (cfg_.contact_grasp) data_->eq_active[staging_eq_] = 0;
+}
+
+bool SimEnv::stagingActive() const {
+  return cfg_.contact_grasp && data_->eq_active[staging_eq_] != 0;
+}
+
+void SimEnv::setFingerTarget(Arm a, double opening) {
+  if (!cfg_.contact_grasp) return;
+  finger_target_override_[armIndex(a)] = opening < 0.0
+      ? -1.0 : std::clamp(opening, 0.0, 0.04);
 }
 
 ObjectState SimEnv::objectState() const {

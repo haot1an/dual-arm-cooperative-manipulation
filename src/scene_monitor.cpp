@@ -15,7 +15,8 @@ const char* const kFixedColumns[] = {
     "obj_drift_x",   "obj_drift_y",     "obj_drift_z",     "obj_drift_rx",   "obj_drift_ry",   "obj_drift_rz",
     "screw_angle",   "screw_rate",      "screw_feed",      "screw_tau_seat", "screw_tau_damp", "screw_tau_fric",
     "screw_tau_resist", "screw_lead_err", "hold_ft_axis", "hold_weld_axis",  "work_ft_axis",   "work_weld_axis",
-    "hold_ft_axial", "hold_weld_axial", "work_ft_axial", "work_weld_axial", "d_min"};
+    "hold_ft_axial", "hold_weld_axial", "work_ft_axial", "work_weld_axial", "d_min",
+    "grip_l1", "grip_l2", "grip_r1", "grip_r2"};
 constexpr int kNumFixed = sizeof(kFixedColumns) / sizeof(kFixedColumns[0]);
 
 Matrix3d mat3(const mjtNum* xmat) { return Eigen::Map<const Eigen::Matrix<double, 3, 3, Eigen::RowMajor>>(xmat); }
@@ -67,7 +68,7 @@ void SceneMonitor::update(const DualArmState& rec) {
   // --- 抓取连线上的挤压力 / 扭转力矩（weld 真值），两手抓同一 body 时才有意义 ---
   const Vector3d pL(d->site_xpos + 3 * idx[Arm::Left].grasp_site);
   const Vector3d pR(d->site_xpos + 3 * idx[Arm::Right].grasp_site);
-  if (same_body_ && (pR - pL).norm() > 1e-9) {
+  if (!env_.config().contact_grasp && same_body_ && (pR - pL).norm() > 1e-9) {
     const Vector3d e = (pR - pL).normalized();
     const Wrench& wL = rec.arm(Arm::Left).weld_wrench;
     const Wrench& wR = rec.arm(Arm::Right).weld_wrench;
@@ -103,19 +104,25 @@ void SceneMonitor::update(const DualArmState& rec) {
     const auto& wk = rec.arm(work_);
     const Vector3d gh(d->site_xpos + 3 * idx[hold_].grasp_site), gw(d->site_xpos + 3 * idx[work_].grasp_site);
     v[20] = aboutAxis(h.ft_ee_world, h.ee_pose.p);
-    v[21] = aboutAxis(h.weld_wrench, gh);
+    if (!env_.config().contact_grasp) v[21] = aboutAxis(h.weld_wrench, gh);
     v[22] = aboutAxis(wk.ft_ee_world, wk.ee_pose.p);
-    v[23] = aboutAxis(wk.weld_wrench, gw);
+    if (!env_.config().contact_grasp) v[23] = aboutAxis(wk.weld_wrench, gw);
     v[24] = h.ft_ee_world.head<3>().dot(a);
-    v[25] = h.weld_wrench.head<3>().dot(a);
+    if (!env_.config().contact_grasp) v[25] = h.weld_wrench.head<3>().dot(a);
     v[26] = wk.ft_ee_world.head<3>().dot(a);
-    v[27] = wk.weld_wrench.head<3>().dot(a);
+    if (!env_.config().contact_grasp) v[27] = wk.weld_wrench.head<3>().dot(a);
   }
   // --- 最小距离 ---
   if (collision_) {
     collision_->query(rec.arm(Arm::Left).q, rec.arm(Arm::Right).q);
     v[28] = collision_->minDistance();
     for (int g = 0; g < collision_->numGroups(); ++g) v[kNumFixed + g] = collision_->groupMinDistance(g);
+  }
+  if (env_.config().contact_grasp) {
+    v[29] = env_.fingerContactNormal(Arm::Left, 0);
+    v[30] = env_.fingerContactNormal(Arm::Left, 1);
+    v[31] = env_.fingerContactNormal(Arm::Right, 0);
+    v[32] = env_.fingerContactNormal(Arm::Right, 1);
   }
 }
 

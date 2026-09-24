@@ -72,6 +72,10 @@ struct SceneIndices {
 /// 返回未编译的 mjSpec（可继续修改后用 compileSpec 编译，可多次编译）。失败抛异常。
 MjSpecPtr loadSceneSpec(const std::string& xml_path, const std::array<Pose, kNumArms>& base_poses,
                         const std::array<double, kNumArms>& finger_openings, double timestep);
+/// 将固定手指改为 slide joint + 限力位置执行器（每手两指以 joint equality 对称联动）；只用于 contact plant。
+void addContactGrippers(mjSpec* spec);
+/// 删除指定手指与被抓 body 之间的 contact exclude，保留其它排除项和螺旋副约束。
+void enableFingerGraspContacts(mjSpec* spec, const SceneSpec& scene);
 /// 编译 mjSpec；失败抛异常（what 用于错误信息）
 MjModelPtr compileSpec(mjSpec* spec, const std::string& what);
 

@@ -75,6 +75,97 @@ MjSpecPtr loadSceneSpec(const std::string& xml_path, const std::array<Pose, kNum
   return spec;
 }
 
+void addContactGrippers(mjSpec* spec) {
+  for (Arm arm : kArms) {
+    for (const char* side : {"left", "right"}) {
+      const std::string base = std::string(armName(arm)) + "_" + side + "_finger";
+      mjsBody* body = mjs_findBody(spec, base.c_str());
+      if (!body) throw std::runtime_error("missing finger body '" + base + "'");
+      body->pos[1] = 0.0;
+      mjsJoint* joint = mjs_addJoint(body, nullptr);
+      if (!joint) throw std::runtime_error("cannot add slide joint to '" + base + "'");
+      const std::string joint_name = base + "_slide";
+      mjs_setName(joint->element, joint_name.c_str());
+      joint->type = mjJNT_SLIDE;
+      joint->axis[0] = joint->axis[2] = 0.0;
+      joint->axis[1] = 1.0;
+      joint->limited = mjLIMITED_TRUE;
+      joint->range[0] = 0.0;
+      joint->range[1] = 0.04;
+      // 重夹时接触力不能把 slide joint 推过中心线；默认软限位在
+      // 35 N 夹持力下可能出现厘米级越界，导致两指从圆柱同侧夹住。
+      joint->solref_limit[0] = 0.001;
+      joint->solref_limit[1] = 1.0;
+      joint->solimp_limit[0] = 0.99;
+      joint->solimp_limit[1] = 0.999;
+      joint->solimp_limit[2] = 0.001;
+      joint->solimp_limit[3] = 0.5;
+      joint->solimp_limit[4] = 2.0;
+      joint->armature = 0.002;
+      joint->damping[0] = 2.0;
+      mjsActuator* act = mjs_addActuator(spec, nullptr);
+      if (!act) throw std::runtime_error("cannot add actuator for '" + base + "'");
+      mjs_setName(act->element, (base + "_position").c_str());
+      act->trntype = mjTRN_JOINT;
+      mjs_setString(act->target, joint_name.c_str());
+      act->gaintype = mjGAIN_FIXED;
+      act->gainprm[0] = 1500.0;
+      act->biastype = mjBIAS_AFFINE;
+      act->biasprm[1] = -1500.0;
+      act->ctrllimited = mjLIMITED_TRUE;
+      act->ctrlrange[0] = 0.0;
+      act->ctrlrange[1] = 0.04;
+      act->forcelimited = mjLIMITED_TRUE;
+      act->forcerange[0] = -35.0;
+      act->forcerange[1] = 35.0;
+    }
+    // Franka Hand 的两指由齿条机构联动、始终对称开合。两个独立位置伺服会在手相对物体
+    // 横向滞后时一指被推开、另一指脱离接触（slot_avoid 越障时右手出现过毫秒级失接触）。
+    // 用 joint equality 把两指开度锁成相等：夹持力仍由两个限力执行器提供，但手不再相对物体横向“漂”。
+    const std::string prefix = std::string(armName(arm)) + "_";
+    mjsEquality* coupling = mjs_addEquality(spec, nullptr);
+    if (!coupling) throw std::runtime_error("cannot add finger coupling for '" + prefix + "hand'");
+    mjs_setName(coupling->element, (prefix + "finger_coupling").c_str());
+    coupling->type = mjEQ_JOINT;
+    coupling->objtype = mjOBJ_JOINT;
+    mjs_setString(coupling->name1, (prefix + "left_finger_slide").c_str());
+    mjs_setString(coupling->name2, (prefix + "right_finger_slide").c_str());
+    for (double& v : coupling->data) v = 0.0;
+    coupling->data[1] = 1.0;  // q_left = 0 + 1 * q_right
+    coupling->active = 1;
+    coupling->solref[0] = 0.002;
+    coupling->solref[1] = 1.0;
+  }
+}
+
+void enableFingerGraspContacts(mjSpec* spec, const SceneSpec& scene) {
+  // scene grasp weld 留在模型里供结构索引/控制器模型使用，但 contact plant 中禁用。
+  // 删除 keyframe：其 qpos 维数对应固定手指，加入 slide joint 后不再有效。
+  for (mjsElement* e = mjs_firstElement(spec, mjOBJ_KEY); e;) {
+    mjsElement* next = mjs_nextElement(spec, e);
+    if (mjs_delete(spec, e)) throw std::runtime_error("cannot delete old keyframe");
+    e = next;
+  }
+  for (mjsElement* e = mjs_firstElement(spec, mjOBJ_EXCLUDE); e;) {
+    mjsElement* next = mjs_nextElement(spec, e);
+    mjsExclude* ex = mjs_asExclude(e);
+    const std::string b1 = mjs_getString(ex->bodyname1);
+    const std::string b2 = mjs_getString(ex->bodyname2);
+    bool remove = false;
+    for (Arm arm : kArms) {
+      const std::string prefix = std::string(armName(arm)) + "_";
+      const ClosedChainConstraint* grasp_constraint = scene.constraint(scene.graspOf(arm).weld);
+      if (!grasp_constraint) throw std::runtime_error("contact grasp has no matching weld constraint");
+      const std::string& grasp_body = grasp_constraint->body2;
+      const bool finger1 = b1 == prefix + "left_finger" || b1 == prefix + "right_finger";
+      const bool finger2 = b2 == prefix + "left_finger" || b2 == prefix + "right_finger";
+      remove |= (finger1 && b2 == grasp_body) || (finger2 && b1 == grasp_body);
+    }
+    if (remove && mjs_delete(spec, e)) throw std::runtime_error("cannot enable finger contact");
+    e = next;
+  }
+}
+
 MjModelPtr compileSpec(mjSpec* spec, const std::string& what) {
   mjModel* m = mj_compile(spec, nullptr);
   if (!m) throw std::runtime_error("failed to compile '" + what + "': " + mjs_getError(spec));
@@ -191,6 +282,8 @@ void completeSceneSpec(SceneSpec& scene, const mjModel* m) {
     const int s = requireId(m, mjOBJ_SITE, g.site);
     g.body = mj_id2name(m, mjOBJ_BODY, m->site_bodyid[s]);
     g.site_in_body = poseFromMj(m->site_pos + 3 * s, m->site_quat + 4 * s);
+    if (scene.contact_grasp && g.contact_depth != 0.0)
+      g.site_in_body.p += g.site_in_body.R().col(2) * g.contact_depth;
   }
   for (const auto& c : scene.constraints) {
     requireId(m, mjOBJ_BODY, c.body1);

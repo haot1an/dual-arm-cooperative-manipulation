@@ -10,8 +10,9 @@ object:
 
 # 两臂沿板长轴水平接近，在两端面中心夹住板厚（20 mm）：finger_opening = T/2 + 1 mm
 grasps:
-  left:  {site: grasp_L, weld: weld_L, finger_opening: 0.011}
-  right: {site: grasp_R, weld: weld_R, finger_opening: 0.011}
+  # contact_depth：接触模式下抓取点再向板内 15 mm（TCP 距端面 25 mm，指垫完整压在板上，手掌离端面 12 mm）
+  left:  {site: grasp_L, weld: weld_L, finger_opening: 0.011, contact_depth: 0.015}
+  right: {site: grasp_R, weld: weld_R, finger_opening: 0.011, contact_depth: 0.015}
 
 # 两个 rigid 约束 → 两臂之间相对自由度 0 → 内力空间 6 维（其中绕长轴的“扭转”内力矩对姿态误差最敏感）
 constraints:

@@ -1,0 +1,65 @@
+<!-- 轨迹规划对比场景：长板滚转后须从一道低矮吊装横梁下方穿过，再插入窄槽。
+     横梁底面 z = 1.17，而滚转后竖直的板顶在 z = 1.231：名义直线路径会穿进横梁约 6 cm，须整体下压约 8 cm，
+     穿过后又要在约 5 cm 的平移距离内抬回槽壁（顶面 z = 1.0）以上。
+     横梁上方一直延伸到 z = 1.60，从上方越过不可行；只按偏好方向（向上）绕行的 CBF 会在横梁前安全停住。
+     吊挂横梁的顶部结构不建模（横梁悬空，只保留其本体）。 -->
+<mujoco model="scene_slot_gate">
+  <include file="workcell.xml"/>
+
+  <worldbody>
+    <camera name="cam_iso" pos="1.20 -1.70 1.75" xyaxes="0.8165 0.5774 0 -0.3333 0.4714 0.8165"/>
+    <camera name="cam_front" pos="0 -2.30 1.45" xyaxes="1 0 0 0 0.4472 0.8944"/>
+    <camera name="cam_side" pos="1.05 -1.3 1.5" xyaxes="0.5963 0.8027 -0.0000 -0.2348 0.1744 0.9563"/>
+
+    <body name="riser" pos="0 -0.4500 0.8075">
+      <geom name="riser" class="prop" size="0.2400 0.0800 0.0575" material="prop_grey"/>
+    </body>
+
+    <body name="slot_frame" pos="0 -0.6500 0.7500">
+      <geom name="slot_base" class="prop" size="0.3200 0.0700 0.1000"
+        pos="0 0 0.1000" material="prop_dark"/>
+      <geom name="slot_wall_front" class="prop" size="0.3200 0.0250 0.0250"
+        pos="0 -0.0450 0.2250" material="prop_blue"/>
+      <geom name="slot_wall_back" class="prop" size="0.3200 0.0250 0.0250"
+        pos="0 0.0450 0.2250" material="prop_blue"/>
+    </body>
+
+    <!-- 吊装横梁：x ∈ [−0.32, 0.32]（两手在外侧通过），y ∈ [−0.48, −0.45]，z ∈ [1.17, 1.60] -->
+    <body name="gate" pos="0 -0.465 1.385">
+      <geom name="gate" class="prop" type="box" size="0.3200 0.0150 0.2150" material="obstacle"/>
+    </body>
+
+    <body name="plate" pos="0 -0.4500 0.8760">
+      <freejoint name="plate_joint"/>
+      <geom name="plate_geom" type="box" size="0.3000 0.1000 0.0100"
+        mass="1.2" material="wood" friction="0.8 0.02 0.001"/>
+      <site name="grasp_L" pos="0.2900 0 0" quat="0.5 -0.5 -0.5 0.5"
+        size="0.008" rgba="0 0.8 0 1"/>
+      <site name="grasp_R" pos="-0.2900 0 0" quat="-0.5 0.5 -0.5 0.5"
+        size="0.008" rgba="0 0.8 0 1"/>
+      <site name="plate_center" size="0.008" rgba="0 0 1 1"/>
+    </body>
+  </worldbody>
+
+  <equality>
+    <weld name="weld_L" body1="left_hand" body2="plate" anchor="0.2900 0 0"
+      solref="0.004 1" solimp="0.95 0.99 0.001 0.5 2"/>
+    <weld name="weld_R" body1="right_hand" body2="plate" anchor="-0.2900 0 0"
+      solref="0.004 1" solimp="0.95 0.99 0.001 0.5 2"/>
+  </equality>
+
+  <contact>
+    <exclude body1="left_hand" body2="plate"/>
+    <exclude body1="left_left_finger" body2="plate"/>
+    <exclude body1="left_right_finger" body2="plate"/>
+    <exclude body1="left_link7" body2="plate"/>
+    <exclude body1="right_hand" body2="plate"/>
+    <exclude body1="right_left_finger" body2="plate"/>
+    <exclude body1="right_right_finger" body2="plate"/>
+    <exclude body1="right_link7" body2="plate"/>
+  </contact>
+
+  <keyframe>
+    <key name="init" qpos="0.82126 0.609877 -0.273083 -2.2449 -1.20616 1.61184 -1.12358 -0.871891 0.618396 0.323701 -2.24691 1.18778 1.63681 -0.439111 0 -0.45 0.876 1 0 0 0"/>
+  </keyframe>
+</mujoco>

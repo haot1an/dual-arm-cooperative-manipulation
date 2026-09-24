@@ -64,7 +64,7 @@ namespace dual_arm
     };
 
     AsymmetricCoopController(std::shared_ptr<RobotModel> model, std::shared_ptr<const ObjectTrajectory> trajectory,
-                             const AsymCoopConfig &params);
+                             const AsymCoopConfig &params, bool contact_grasp = false);
 
     const char *name() const override { return "asym_coop"; }
     void reset(const DualArmState &initial_state) override;
@@ -85,6 +85,7 @@ namespace dual_arm
   private:
     std::shared_ptr<const ObjectTrajectory> trajectory_;
     AsymCoopConfig params_;
+    bool contact_grasp_ = false;
     int n_rel_ = 0;
     /// 持握臂在 reset 时的 TCP 位姿。
     Pose holding_pose_reference_;

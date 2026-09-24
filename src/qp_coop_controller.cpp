@@ -1,6 +1,7 @@
 #include "dual_arm/qp_coop_controller.hpp"
 
 #include "dual_arm/coop_kinematics.hpp"
+#include "dual_arm/math_utils.hpp"
 
 #include <array>
 #include <limits>
@@ -15,12 +16,14 @@ QpCoopController::QpCoopController(
     const CoopConfig& coop_config,
     const TorqueQpConfig& qp_config,
     const CollisionConfig& collision_config,
-    double timestep)
+    double timestep,
+    bool contact_grasp)
     : Controller(model),
-      nominal_controller_(model, trajectory, coop_config),
+      nominal_controller_(model, trajectory, coop_config, contact_grasp),
       trajectory_(std::move(trajectory)),
       qp_config_(qp_config),
       timestep_(timestep),
+      contact_grasp_(contact_grasp),
       qp_(qp_config)
 {
   if (!(timestep_ > 0.0))
@@ -45,11 +48,12 @@ QpCoopController::QpCoopController(
       !scene().obstacles.empty())
   {
     CollisionConfig controller_collision_config = collision_config;
-    controller_collision_config.margin = std::max(
-        qp_config_.collision_influence_distance,
-        qp_config_.reference_governor.enabled
-            ? qp_config_.reference_governor.trigger_distance
-            : 0.0);
+    const auto& governor = qp_config_.reference_governor;
+    const bool cbf_mode = governor.mode == TorqueQpConfig::ReferenceGovernorConfig::Mode::Cbf;
+    const double governor_range = !governor.enabled ? 0.0
+        : cbf_mode ? governor.cbf.escape_activation + governor.cbf.safe_distance + 0.01
+                   : governor.trigger_distance;
+    controller_collision_config.margin = std::max(qp_config_.collision_influence_distance, governor_range);
     controller_collision_config.threads = qp_config_.collision_threads;
     collision_model_ = std::make_unique<CollisionModel>(
         scene(),
@@ -58,6 +62,20 @@ QpCoopController::QpCoopController(
             model_->basePose(Arm::Right)},
         controller_collision_config,
         timestep_);
+  }
+
+  if (qp_config_.reference_governor.enabled &&
+      qp_config_.reference_governor.mode == TorqueQpConfig::ReferenceGovernorConfig::Mode::Cbf)
+  {
+    // CBF 需要从物体指向障碍的法向：障碍对必须写成 [object, <障碍>]。
+    const std::string& group = qp_config_.reference_governor.obstacle_group;
+    bool found = false;
+    for (const ObstaclePairSpec& pair : scene().obstacles)
+      found |= pair.a + "~" + pair.b == group && pair.a == "object";
+    if (!collision_model_ || !found)
+      throw std::invalid_argument("QpCoopController: cbf governor needs an obstacle pair [object, <obstacle>] named '" +
+                                  group + "'");
+    cbf_filter_ = std::make_unique<CbfReferenceFilter>(qp_config_.reference_governor.cbf, timestep_);
   }
 
   for (Arm arm : kArms)
@@ -84,6 +102,7 @@ const char* QpCoopController::governorPhaseName(GovernorPhase phase)
     case GovernorPhase::Lift: return "LIFT";
     case GovernorPhase::Cross: return "CROSS";
     case GovernorPhase::Descend: return "DESCEND";
+    case GovernorPhase::Cbf: return "CBF";
   }
   return "UNKNOWN";
 }
@@ -103,7 +122,42 @@ void QpCoopController::reset(const DualArmState& initial_state)
   governor_virtual_time_ = initial_state.t;
   governor_entry_normal_.setZero();
   governed_reference_ = trajectory_->evaluate(governor_virtual_time_);
+  if (cbf_filter_) cbf_filter_->reset(governor_virtual_time_);
 }
+
+void QpCoopController::updateCbfGovernor(const DualArmState& state, const std::vector<DistanceInfo>* distances)
+{
+  // 取该障碍组中距离最小的 kMaxObstacles 个 geom 对（按距离升序插入，定长数组、无分配）。
+  // 超出碰撞模型 margin 的 pair 距离被截断、法向无意义，不送入 CBF。
+  CbfReferenceFilter::Obstacles obstacles;
+  int count = 0;
+  if (distances)
+  {
+    const std::string& group = qp_config_.reference_governor.obstacle_group;
+    for (const DistanceInfo& info : *distances)
+    {
+      if (info.distance >= collision_model_->margin() || collision_model_->groupName(info.group) != group)
+        continue;
+      if (count == CbfReferenceFilter::kMaxObstacles &&
+          info.distance >= obstacles[CbfReferenceFilter::kMaxObstacles - 1].distance)
+        continue;
+      int slot = std::min(count, CbfReferenceFilter::kMaxObstacles - 1);
+      while (slot > 0 && obstacles[slot - 1].distance > info.distance)
+      {
+        obstacles[slot] = obstacles[slot - 1];
+        --slot;
+      }
+      obstacles[slot] = CbfObstacle{info.distance, info.normal, info.point1, info.group};
+      count = std::min(count + 1, CbfReferenceFilter::kMaxObstacles);
+    }
+  }
+  const ObjectReference nominal = trajectory_->evaluate(cbf_filter_->virtualTime());
+  governed_reference_ = cbf_filter_->update(nominal, state.object.pose, obstacles, count);
+  governor_offset_ = cbf_filter_->offset().norm();
+  governor_virtual_time_ = cbf_filter_->virtualTime();
+  governor_phase_ = cbf_filter_->engaged() ? GovernorPhase::Cbf : GovernorPhase::Normal;
+}
+
 
 std::pair<Vector7d, Vector7d> QpCoopController::compute(
     const DualArmState& state,
@@ -120,14 +174,22 @@ std::pair<Vector7d, Vector7d> QpCoopController::compute(
     collision_min_distance_ = collision_model_->minDistance();
   }
 
-  governed_reference_ = trajectory_->evaluate(governor_virtual_time_);
   bool freeze_trajectory = false;
   double offset_rate = 0.0;
-  if (qp_config_.reference_governor.enabled && collision_model_)
+  if (cbf_filter_)
+  {
+    updateCbfGovernor(state, collision_distances);
+  }
+  else
+  {
+    governed_reference_ = trajectory_->evaluate(governor_virtual_time_);
+  }
+  if (!cbf_filter_ && qp_config_.reference_governor.enabled && collision_model_)
   {
     const auto& governor = qp_config_.reference_governor;
     double obstacle_distance = collision_model_->margin();
     Vector3d obstacle_normal = Vector3d::Zero();
+    Vector3d obstacle_point = state.object.pose.p;
     if (collision_distances)
     {
       for (const DistanceInfo& info : *collision_distances)
@@ -137,14 +199,18 @@ std::pair<Vector7d, Vector7d> QpCoopController::compute(
         {
           obstacle_distance = info.distance;
           obstacle_normal = info.normal;
+          obstacle_point = info.point1;
         }
       }
     }
 
     // obstacle pair 必须写成 [object, obstacle]：normal 从物体指向障碍物。
     // n·v_ref > 0 表示物体参考速度正在沿法向接近障碍物。
-    const bool approaching =
-        obstacle_normal.dot(governed_reference_.twist.head<3>()) > 1e-4;
+    Vector3d approach_velocity = governed_reference_.twist.head<3>();
+    if (contact_grasp_)
+      approach_velocity += governed_reference_.twist.tail<3>().cross(
+          obstacle_point - state.object.pose.p);
+    const bool approaching = obstacle_normal.dot(approach_velocity) > 1e-4;
     if (governor_phase_ == GovernorPhase::Normal &&
         obstacle_distance < governor.trigger_distance && approaching)
     {
@@ -199,7 +265,7 @@ std::pair<Vector7d, Vector7d> QpCoopController::compute(
         offset_rate * governor.preferred_direction;
   }
 
-  if (!freeze_trajectory)
+  if (!cbf_filter_ && !freeze_trajectory)
   {
     governor_virtual_time_ += timestep_;
   }
@@ -210,6 +276,26 @@ std::pair<Vector7d, Vector7d> QpCoopController::compute(
   Vector14d desired_torque;
   desired_torque.head<kArmDof>() = nominal_left;
   desired_torque.tail<kArmDof>() = nominal_right;
+  if (contact_grasp_)
+  {
+    // 接触夹取不是 6D holonomic weld；用相对位姿阻抗维持接触斑，
+    // 同时保留 QP 的力矩、关节与碰撞不等式约束。
+    for (Arm arm : kArms)
+    {
+      const Pose target = state.object.pose * scene().graspOf(arm).site_in_body;
+      Vector6d target_twist = state.object.twist;
+      target_twist.head<3>() += state.object.twist.tail<3>().cross(target.p - state.object.pose.p);
+      const Vector6d e = poseError(target, state.arm(arm).ee_pose);
+      const Vector6d de = target_twist - state.arm(arm).ee_twist;
+      Wrench w;
+      w.head<3>() = 550.0 * e.head<3>() + 50.0 * de.head<3>();
+      w.tail<3>() = 40.0 * e.tail<3>() + 4.0 * de.tail<3>();
+      w.head<3>() = w.head<3>().cwiseMax(-50.0).cwiseMin(50.0);
+      w.tail<3>() = w.tail<3>().cwiseMax(-8.0).cwiseMin(8.0);
+      desired_torque.segment<kArmDof>(armIndex(arm) * kArmDof).noalias() +=
+          model_->jacobian(arm).transpose() * w;
+    }
+  }
 
   Matrix14d mass_matrix = Matrix14d::Zero();
   Vector14d bias;
@@ -249,11 +335,11 @@ std::pair<Vector7d, Vector7d> QpCoopController::compute(
   const Vector6d relative_bias =
       accelerationAtObjectCenter(Arm::Right, r_right) -
       accelerationAtObjectCenter(Arm::Left, r_left);
-  const Matrix6x14d acceleration_equality_matrix = relative_jacobian;
-  const Vector6d acceleration_equality_target =
-      -qp_config_.closed_chain_velocity_damping *
-          (relative_jacobian * velocity) -
-      relative_bias;
+  const Matrix6x14d acceleration_equality_matrix =
+      contact_grasp_ ? Matrix6x14d::Zero().eval() : relative_jacobian;
+  const Vector6d acceleration_equality_target = contact_grasp_
+      ? Vector6d::Zero().eval()
+      : (-qp_config_.closed_chain_velocity_damping * (relative_jacobian * velocity) - relative_bias).eval();
 
   JointSafetyTorqueQp::CollisionMatrix collision_matrix =
       JointSafetyTorqueQp::CollisionMatrix::Zero();

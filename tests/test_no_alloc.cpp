@@ -17,6 +17,8 @@
 #include "dual_arm/qp_coop_controller.hpp"
 #include "dual_arm/scene_monitor.hpp"
 #include "dual_arm/sim_env.hpp"
+#include "dual_arm/trajectory_optimizer.hpp"
+#include "dual_arm/trajectory_planner.hpp"
 #include "test_common.hpp"
 
 #include <gtest/gtest.h>
@@ -68,13 +70,29 @@ using namespace dual_arm;
 namespace
 {
 
-  long countAllocationsInControlLoop(const std::string &controller, const std::string &scene)
+  long countAllocationsInControlLoop(const std::string &controller, const std::string &scene,
+                                     std::vector<std::string> overrides = {})
   {
-    const SimConfig cfg =
-        loadConfig("config/default.yaml", {"log.enabled=false", "controller.type=" + controller}, scene);
+    overrides.insert(overrides.begin(), {"log.enabled=false", "controller.type=" + controller});
+    const SimConfig cfg = loadConfig("config/default.yaml", overrides, scene);
     SimEnv env(cfg);
     auto model = std::make_shared<MujocoRobotModel>(cfg);
     auto traj = std::make_shared<ObjectTrajectory>(cfg.object_trajectory, env.state().object.pose, env.scene().waypoints);
+    if (cfg.planner.enabled)
+    {
+      // 规划在计数前离线完成；计数的控制循环里只有 evaluate()（查表 + 样条）
+      ObjectPathPlanner planner(cfg.planner, cfg.torque_qp.collision_safe_distance, cfg.collision, model, traj);
+      PlanResult plan = planner.plan();
+      if (cfg.planner.formulation == PlannerConfig::Formulation::Full)
+      {
+        // 联合优化结果：姿态偏移 + 节点时间映射，evaluate() 同样须零分配
+        ObjectTrajectoryOptimizer optimizer(cfg.planner, cfg.torque_qp.collision_safe_distance, cfg.collision, model,
+                                            traj);
+        const PlanResult lateral = plan;
+        plan = optimizer.optimize(&lateral);
+      }
+      traj->setDeformation(plan.deformation);
+    }
     std::unique_ptr<Controller> ctrl;
     if (controller == "coop")
     {
@@ -247,7 +265,21 @@ TEST(NoAlloc, CoopControlLoopDoesNotAllocate)
   EXPECT_EQ(countAllocationsInControlLoop("asym_coop", "assembly"), 0);
   EXPECT_EQ(countAllocationsInControlLoop("qp_asym_coop", "assembly"), 0);
   EXPECT_EQ(countAllocationsInControlLoop("qp_coop", "slot"), 0);
-  EXPECT_EQ(countAllocationsInControlLoop("qp_coop", "slot_avoid"), 0);
+  EXPECT_EQ(countAllocationsInControlLoop("qp_coop", "slot_avoid",
+                                          {"controller.torque_qp.reference_governor.mode=state_machine"}),
+            0);
+}
+
+TEST(NoAlloc, CbfGovernorControlLoopDoesNotAllocate)
+{
+  EXPECT_EQ(countAllocationsInControlLoop("qp_coop", "slot_avoid",
+                                          {"controller.torque_qp.reference_governor.mode=cbf"}),
+            0);
+}
+
+TEST(NoAlloc, PlannedTrajectoryControlLoopDoesNotAllocate)
+{
+  EXPECT_EQ(countAllocationsInControlLoop("qp_coop", "slot_gate"), 0);
 }
 
 TEST(NoAlloc, CollisionQueryDoesNotAllocate)

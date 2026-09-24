@@ -23,6 +23,7 @@
 #include "dual_arm/scene_spec.hpp"
 #include "dual_arm/types.hpp"
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -47,6 +48,8 @@ struct TrapezoidProfile {
   void sample(double t, double& s, double& ds, double& dds) const;
 };
 
+class PathDeformation;
+
 class ObjectTrajectory {
  public:
   /// initial_pose：t=0 时物体的位姿（通常取 SimEnv 复位后的真实位姿）
@@ -54,10 +57,18 @@ class ObjectTrajectory {
   ObjectTrajectory(const ObjectTrajectoryConfig& cfg, const Pose& initial_pose,
                    const std::vector<Waypoint>& waypoints = {});
 
+  /// 执行用参考：设置了路径变形（轨迹规划结果）时 = 变形 + 重新计时后的轨迹，否则 = evaluateNominal(t)
   ObjectReference evaluate(double t) const;
+  /// 原始（名义）轨迹
+  ObjectReference evaluateNominal(double t) const;
+  /// 叠加轨迹规划得到的路径变形 δ(τ) 与重新计时 τ(t)（nullptr 取消）。须在控制器 reset 前设置。
+  void setDeformation(std::shared_ptr<const PathDeformation> deformation) { deformation_ = std::move(deformation); }
+  const PathDeformation* deformation() const { return deformation_.get(); }
   const Pose& initialPose() const { return p0_; }
-  /// waypoints 轨迹的结束时刻（其它类型返回 t_start）
-  double endTime() const { return t_end_; }
+  /// 轨迹的结束时刻（其它类型返回 t_start；有路径变形时为重新计时后的执行时间）
+  double endTime() const;
+  /// 名义轨迹的结束时刻
+  double nominalEndTime() const { return t_end_; }
   /// 第 k 段（航点 k → k+1）的 [开始, 结束) 时刻与名字
   struct Segment {
     std::string from, to;
@@ -77,6 +88,7 @@ class ObjectTrajectory {
   std::vector<Segment> segs_;
   double t_end_ = 0.0;
   double psi_init_ = 0.0;
+  std::shared_ptr<const PathDeformation> deformation_;
 };
 
 }  // namespace dual_arm

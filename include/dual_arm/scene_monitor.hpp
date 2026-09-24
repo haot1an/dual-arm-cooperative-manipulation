@@ -19,6 +19,7 @@
  *   work_ft_axial, work_weld_axial 作业臂沿任务轴 +a 方向的力 [N]；压向工件的预紧力为负值
  *   d_min                          全部障碍对的最小有符号距离 [m]（CollisionModel，plant 真实基座位姿；> margin 记为 margin）
  *   d_<a>~<b>                      每个障碍组的最小距离
+ *   grip_l1/l2/r1/r2               接触模式的四指法向力 [N]；weld 模式为 NaN
  * update() 不做动态内存分配。
  */
 #include "dual_arm/collision_model.hpp"

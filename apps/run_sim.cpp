@@ -19,6 +19,7 @@
 #include "dual_arm/config.hpp"
 #include "dual_arm/coop_controller.hpp"
 #include "dual_arm/coop_kinematics.hpp"
+#include "dual_arm/grasp_alignment.hpp"
 #include "dual_arm/logger.hpp"
 #include "dual_arm/math_utils.hpp"
 #include "dual_arm/mujoco_model.hpp"
@@ -26,6 +27,8 @@
 #include "dual_arm/qp_coop_controller.hpp"
 #include "dual_arm/qp_asym_coop_controller.hpp"
 #include "dual_arm/scene_monitor.hpp"
+#include "dual_arm/trajectory_optimizer.hpp"
+#include "dual_arm/trajectory_planner.hpp"
 #include "dual_arm/sim_env.hpp"
 #ifdef DUAL_ARM_HAS_VIEWER
 #include "dual_arm/viewer.hpp"
@@ -55,6 +58,7 @@ namespace
     std::string scene;
     std::vector<std::string> overrides;
     bool headless = false;
+    bool check_contact = false;
     bool log = true;
     bool realtime = true;
     std::string screenshot;
@@ -71,6 +75,8 @@ namespace
         "  --scene NAME           场景：lift | slot | slot_avoid | assembly | assembly_simple（覆盖 default.yaml 中的 scene）\n"
         "  --config PATH          公共配置文件（默认 config/default.yaml，相对工程根目录）\n"
         "  --controller NAME      gravity_pd | coop | qp_coop | asym_coop | qp_asym_coop（覆盖 controller.type）\n"
+        "  --contact-grasp        使用真实手指接触夹取（slot / slot_avoid / assembly）\n"
+        "  --check-contact        结束时验收四指接触和场景目标；失败返回非零\n"
         "  --headless             无界面，全速运行\n"
         "  --duration SEC         仿真时长（覆盖 simulation.duration）\n"
         "  --calib-error          打开右臂基座标定误差（calibration_error.enabled=true）\n"
@@ -122,6 +128,14 @@ namespace
       else if (s == "--headless")
       {
         a.headless = true;
+      }
+      else if (s == "--contact-grasp")
+      {
+        a.overrides.push_back("simulation.contact_grasp=true");
+      }
+      else if (s == "--check-contact")
+      {
+        a.check_contact = true;
       }
       else if (s == "--duration")
       {
@@ -185,7 +199,7 @@ namespace
           cfg.cartesian_impedance);
     }
     if (cfg.controller == "coop")
-      return std::make_unique<CoopController>(model, traj, cfg.coop);
+      return std::make_unique<CoopController>(model, traj, cfg.coop, cfg.contact_grasp);
     if (cfg.controller == "qp_coop")
       return std::make_unique<QpCoopController>(
           model,
@@ -193,9 +207,10 @@ namespace
           cfg.coop,
           cfg.torque_qp,
           cfg.collision,
-          cfg.timestep);
+          cfg.timestep,
+          cfg.contact_grasp);
     if (cfg.controller == "asym_coop")
-      return std::make_unique<AsymmetricCoopController>(model, traj, cfg.asym_coop);
+      return std::make_unique<AsymmetricCoopController>(model, traj, cfg.asym_coop, cfg.contact_grasp);
     if (cfg.controller == "qp_asym_coop")
       return std::make_unique<QpAsymmetricCoopController>(
           model,
@@ -203,7 +218,8 @@ namespace
           cfg.asym_coop,
           cfg.torque_qp,
           cfg.collision,
-          cfg.timestep);
+          cfg.timestep,
+          cfg.contact_grasp);
 
     throw std::runtime_error(
         "unknown controller '" + cfg.controller +
@@ -260,16 +276,19 @@ namespace
     std::printf("[run_sim] object '%s': %.3f kg | grasps: left -> %s (%s), right -> %s (%s)\n", sc.object.body.c_str(),
                 sc.object.mass, sc.grasp[0].body.c_str(), sc.grasp[0].site.c_str(), sc.grasp[1].body.c_str(),
                 sc.grasp[1].site.c_str());
-    std::printf("[run_sim] closed chain:");
+    std::printf("[run_sim] nominal task constraints:");
     for (const auto &c : sc.constraints)
     {
       std::printf(" %s[%s %s-%s, rel %d]", c.name.c_str(), c.type == ConstraintType::Rigid ? "rigid" : "screw",
                   c.body1.c_str(), c.body2.c_str(), c.relative_dof);
     }
     const int nr = sc.relativeDofBetweenHands();
-    std::printf("\n[run_sim] relative DOF between hands = %d -> internal-force dimension = %d\n", nr, 6 - nr);
-    std::printf("[run_sim] controller = %s | dt = %.4g s | duration = %.3g s | contacts %s\n", cfg.controller.c_str(),
-                env.timestep(), cfg.duration, cfg.contacts ? "on" : "off");
+    if (cfg.contact_grasp)
+      std::printf("\n[run_sim] grasp welds disabled in plant: friction contact has no fixed rigid internal-force dimension\n");
+    else
+      std::printf("\n[run_sim] relative DOF between hands = %d -> internal-force dimension = %d\n", nr, 6 - nr);
+    std::printf("[run_sim] controller = %s | dt = %.4g s | duration = %.3g s | contacts %s | grasp %s\n", cfg.controller.c_str(),
+                env.timestep(), cfg.duration, cfg.contacts ? "on" : "off", cfg.contact_grasp ? "finger contact" : "weld");
     const auto &ce = cfg.calibration_error;
     if (ce.enabled)
     {
@@ -282,9 +301,10 @@ namespace
     {
       std::printf("[run_sim] calibration error OFF\n");
     }
-    std::printf("[run_sim] weld init_mode = %s, solref = [%.4g %.4g]\n",
-                cfg.weld.init_mode == WeldConfig::InitMode::Current ? "current" : "nominal", cfg.weld.solref[0],
-                cfg.weld.solref[1]);
+    if (!cfg.contact_grasp)
+      std::printf("[run_sim] weld init_mode = %s, solref = [%.4g %.4g]\n",
+                  cfg.weld.init_mode == WeldConfig::InitMode::Current ? "current" : "nominal", cfg.weld.solref[0],
+                  cfg.weld.solref[1]);
     for (Arm a : kArms)
     {
       const Vector6d &e = env.initialGraspMismatch(a);
@@ -324,6 +344,8 @@ namespace
     double d_min = 1e9;                    ///< 记录到的最小障碍距离 [m]
     double governor_offset_max = 0.0;       ///< 自主避障最大参考偏移 [m]
     long governor_active_steps = 0;         ///< governor 非 Normal 的控制周期数
+    long grasp_loss_steps = 0;               ///< 抓取完成后四指任一失去接触的周期数
+    double max_grasp_position_error = 0.0;   ///< 任务期间 TCP 到抓取点最大距离
     int governor_events = 0;                ///< Normal -> Lift 的触发次数
     QpCoopController::GovernorPhase governor_previous_phase =
         QpCoopController::GovernorPhase::Normal;
@@ -339,6 +361,8 @@ int main(int argc, char **argv)
   {
     args = parseArgs(argc, argv);
     cfg = loadConfig(args.config, args.overrides, args.scene);
+    if (args.check_contact && !cfg.contact_grasp)
+      throw std::runtime_error("--check-contact requires --contact-grasp");
   }
   catch (const std::exception &e)
   {
@@ -353,6 +377,34 @@ int main(int argc, char **argv)
     auto model = std::make_shared<MujocoRobotModel>(cfg);
     auto traj = std::make_shared<ObjectTrajectory>(cfg.object_trajectory, env.state().object.pose,
                                                    env.scene().waypoints);
+    PlanResult plan;
+    if (cfg.planner.enabled)
+    {
+      // 任务开始前的物体空间轨迹优化：把名义轨迹变形为无碰撞路径并重新计时（docs/trajectory_planning.md）
+      ObjectPathPlanner planner(cfg.planner, cfg.torque_qp.collision_safe_distance, cfg.collision, model, traj);
+      plan = planner.plan();
+      std::printf("[run_sim] planner: %s | init %s (%d starts) | %d QP iterations (%d accepted) in %.2f s | "
+                  "max offset %.1f mm | worst knot violation %.2f mm | penalty %.0f | duration +%.2f s\n",
+                  plan.message.c_str(), plan.initialization.c_str(), plan.starts, plan.iterations,
+                  plan.accepted_steps, plan.planning_time_s,
+                  1e3 * plan.max_offset, 1e3 * plan.worst_violation, plan.final_penalty, plan.added_duration);
+      if (cfg.planner.formulation == PlannerConfig::Formulation::Full)
+      {
+        // 物体 SE(3) + 时间联合优化：以只平移规划的结果为初值（它失败时退回名义轨迹）
+        ObjectTrajectoryOptimizer optimizer(cfg.planner, cfg.torque_qp.collision_safe_distance, cfg.collision, model,
+                                            traj);
+        const PlanResult lateral = plan;
+        plan = optimizer.optimize(lateral.success ? &lateral : nullptr);
+        std::printf("[run_sim] joint optimizer (SE(3) + time): %s | init %s | %d QP iterations (%d accepted) in %.2f s | "
+                    "max offset %.1f mm | max rotation %.1f deg | worst violation %.2f | duration %+.2f s\n",
+                    plan.message.c_str(), plan.initialization.c_str(), plan.iterations, plan.accepted_steps,
+                    plan.planning_time_s, 1e3 * plan.max_offset, plan.max_rotation * 180.0 / M_PI,
+                    1e3 * plan.worst_violation, plan.added_duration);
+      }
+      if (!plan.success)
+        std::fprintf(stderr, "[run_sim] WARNING: planned path does not satisfy all clearances; executing anyway\n");
+      traj->setDeformation(plan.deformation);
+    }
     auto controller = makeController(cfg, model, traj);
     auto *asym_controller =
         dynamic_cast<AsymmetricCoopController *>(
@@ -363,7 +415,30 @@ int main(int argc, char **argv)
     auto *qp_coop_controller =
         dynamic_cast<QpCoopController *>(
             controller.get());
+    // 接触夹取：各臂抓取点 = 被抓 body 的实测位姿 × site_in_body（相当于视觉定位）
+    auto graspTargets = [&]()
+    {
+      std::array<Pose, kNumArms> targets;
+      for (Arm a : kArms)
+      {
+        const int body = env.indices()[a].grasp_body;
+        targets[armIndex(a)] = poseFromMjMat(env.data()->xpos + 3 * body, env.data()->xmat + 9 * body) *
+                               env.scene().graspOf(a).site_in_body;
+      }
+      return targets;
+    };
+    GraspAlignment alignment(model, cfg.grasp_alignment);
+    if (cfg.contact_grasp)
+    {
+      // 两臂从预抓取位姿出发：抓取点沿接近轴退 approach_distance，手指全开
+      env.setStartConfiguration(alignment.preGraspConfiguration(graspTargets()));
+      env.reset();
+      alignment.reset(env.state());
+    }
     controller->reset(env.state());
+    bool task_started = !cfg.contact_grasp;
+    double task_start_time = 0.0;
+    GraspAlignment::Phase alignment_phase = alignment.phase();
     SceneMonitor monitor(env);
     monitor.update(env.state());
     const double load_s = std::chrono::duration<double>(Clock::now() - t_load0).count();
@@ -390,6 +465,22 @@ int main(int argc, char **argv)
       writeTextFile(run_dir + "/run_info.txt", "command: " + args.cmdline + "\nmujoco: " + mj_versionString() +
                                                    "\nscene: " + cfg.scene.name + "\nmodel: " +
                                                    cfg.scene.model_path + "\ncontroller: " + cfg.controller + "\n");
+      if (plan.deformation)
+      {
+        // 规划节点：名义时间 τ、执行时间 t、偏移 δ、该节点最小距离余量（d − 要求值）
+        std::string csv = "tau,t_exec,dx,dy,dz,rx,ry,rz,min_margin\n";
+        char line[240];
+        for (std::size_t k = 0; k < plan.knot_times.size(); ++k)
+        {
+          const Vector3d rot = k < plan.rotation_offsets.size() ? plan.rotation_offsets[k] : Vector3d::Zero();
+          std::snprintf(line, sizeof(line), "%.4f,%.4f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n", plan.knot_times[k],
+                        plan.deformation->executionTime(plan.knot_times[k]), plan.offsets[k].x(), plan.offsets[k].y(),
+                        plan.offsets[k].z(), rot.x(), rot.y(), rot.z(),
+                        std::isfinite(plan.knot_min_margin[k]) ? plan.knot_min_margin[k] : -1.0);
+          csv += line;
+        }
+        writeTextFile(run_dir + "/planned_path.csv", csv);
+      }
       logger.setExtraColumns(monitor.columns());
       if (!logger.open(run_dir + "/log.csv"))
         throw std::runtime_error("cannot open " + run_dir + "/log.csv");
@@ -408,7 +499,68 @@ int main(int argc, char **argv)
     {
       const DualArmState &s = env.state();
       const auto t0 = Clock::now();
-      const auto [tau_l, tau_r] = controller->compute(s, s.t);
+      Vector7d tau_l, tau_r;
+      if (!task_started)
+      {
+        // 抓取对准：接近 → 对准 → 闭合；完成后撤除托持工装，任务轨迹从此刻起算
+        std::array<std::array<double, 2>, kNumArms> normals;
+        for (Arm a : kArms)
+          for (int f = 0; f < 2; ++f)
+            normals[armIndex(a)][f] = env.fingerContactNormal(a, f);
+        std::tie(tau_l, tau_r) = alignment.compute(s, graspTargets(), normals);
+        for (Arm a : kArms)
+          env.setFingerTarget(a, alignment.fingerTarget(a));
+        if (alignment.phase() != alignment_phase)
+        {
+          alignment_phase = alignment.phase();
+          std::printf("[run_sim] grasp alignment -> %s at t=%.3f s (TCP-grasp error %.2f mm / %.2f deg)\n",
+                      GraspAlignment::phaseName(alignment_phase), s.t, 1e3 * alignment.positionError(),
+                      alignment.orientationError() * 180.0 / M_PI);
+        }
+        if (alignment.done())
+        {
+          env.releaseStaging();
+          task_start_time = s.t;
+          DualArmState start = s;
+          start.t = 0.0;
+          controller->reset(start);
+          task_started = true;
+        }
+      }
+      else
+      {
+        if (cfg.contact_grasp)
+        {
+          DualArmState shifted = s;
+          shifted.t = std::max(0.0, s.t - task_start_time);
+          std::tie(tau_l, tau_r) = controller->compute(shifted, shifted.t);
+        }
+        else
+        {
+          std::tie(tau_l, tau_r) = controller->compute(s, s.t);
+        }
+        if (cfg.contact_grasp && (cfg.scene.name == "slot" || cfg.scene.name == "slot_avoid" || cfg.scene.name == "slot_gate") &&
+            cfg.controller != "qp_coop")
+        {
+          // weld 被移除后，物体级控制本身不能保证 TCP 始终留在接触斑内。
+          // 用真实物体位姿构造两端的 grasp-site 参考，补一个相对位姿/速度阻抗。
+          for (Arm a : kArms)
+          {
+            const Pose target = s.object.pose * env.scene().graspOf(a).site_in_body;
+            Vector6d target_twist = s.object.twist;
+            target_twist.head<3>() += s.object.twist.tail<3>().cross(target.p - s.object.pose.p);
+            const Vector6d e = poseError(target, s.arm(a).ee_pose);
+            const Vector6d de = target_twist - s.arm(a).ee_twist;
+            Wrench grip_wrench;
+            grip_wrench.head<3>() = 550.0 * e.head<3>() + 50.0 * de.head<3>();
+            grip_wrench.tail<3>() = 40.0 * e.tail<3>() + 4.0 * de.tail<3>();
+            grip_wrench.head<3>() = grip_wrench.head<3>().cwiseMax(-50.0).cwiseMin(50.0);
+            grip_wrench.tail<3>() = grip_wrench.tail<3>().cwiseMax(-8.0).cwiseMin(8.0);
+            Vector7d& tau = a == Arm::Left ? tau_l : tau_r;
+            tau.noalias() += model->jacobian(a).transpose() * grip_wrench;
+          }
+        }
+      }
       const auto t1 = Clock::now();
       env.step(tau_l, tau_r);
       const auto t2 = Clock::now();
@@ -420,6 +572,21 @@ int main(int argc, char **argv)
       st.ctrl_max_us = std::max(st.ctrl_max_us, ctrl_us);
       st.step_sum_us += step_us;
       st.obj_dev_max = std::max(st.obj_dev_max, (rec.object.pose.p - obj_p0).norm());
+      if (cfg.contact_grasp && task_started)
+      {
+        bool lost = false;
+        for (Arm a : kArms)
+        {
+          const int site = env.indices()[a].grasp_site;
+          const Pose grasp = poseFromMjMat(env.data()->site_xpos + 3 * site,
+                                           env.data()->site_xmat + 9 * site);
+          st.max_grasp_position_error = std::max(st.max_grasp_position_error,
+                                                (grasp.p - env.eePose(a).p).norm());
+          for (int f = 0; f < 2; ++f)
+            lost |= env.fingerContactNormal(a, f) < 0.2;
+        }
+        if (lost) ++st.grasp_loss_steps;
+      }
       for (Arm a : kArms)
       {
         double &fm = st.weld_force_max[armIndex(a)];
@@ -448,7 +615,7 @@ int main(int argc, char **argv)
       {
         const ObjectReference ref = qp_coop_controller
             ? qp_coop_controller->governedReference()
-            : traj->evaluate(rec.t);
+            : traj->evaluate(cfg.contact_grasp ? std::max(0.0, rec.t - task_start_time) : rec.t);
         monitor.update(rec);
         if (monitor.collision())
           st.d_min = std::min(st.d_min, monitor.collision()->minDistance());
@@ -623,22 +790,27 @@ int main(int argc, char **argv)
         }
         const DualArmState &s = env.state();
         const char *status = diverged ? "\nDIVERGED" : (done ? "\nfinished (Esc to quit)" : (viewer.paused() ? "\npaused" : ""));
+        const char *force_label = cfg.contact_grasp ? "grip normal L / R" : "|F weld| L / R";
+        const double force_l = cfg.contact_grasp
+            ? env.fingerContactNormal(Arm::Left, 0) + env.fingerContactNormal(Arm::Left, 1)
+            : s.arm(Arm::Left).weld_wrench.head<3>().norm();
+        const double force_r = cfg.contact_grasp
+            ? env.fingerContactNormal(Arm::Right, 0) + env.fingerContactNormal(Arm::Right, 1)
+            : s.arm(Arm::Right).weld_wrench.head<3>().norm();
         if (s.screw.valid)
         {
-          std::snprintf(title, sizeof(title), "time\nscene / ctrl\n|F weld| L / R\nobject drift\nscrew angle / feed%s",
-                        *status ? "\nstatus" : "");
+          std::snprintf(title, sizeof(title), "time\nscene / ctrl\n%s\nobject drift\nscrew angle / feed%s",
+                        force_label, *status ? "\nstatus" : "");
           std::snprintf(values, sizeof(values), "%.3f s\n%s / %s\n%.2f / %.2f N\n%.2f mm\n%.1f deg / %.3f mm%s", s.t,
-                        cfg.scene.name.c_str(), controller->name(), s.arm(Arm::Left).weld_wrench.head<3>().norm(),
-                        s.arm(Arm::Right).weld_wrench.head<3>().norm(), 1e3 * (s.object.pose.p - obj_p0).norm(),
+                        cfg.scene.name.c_str(), controller->name(), force_l, force_r, 1e3 * (s.object.pose.p - obj_p0).norm(),
                         s.screw.angle * 180.0 / M_PI, 1e3 * s.screw.feed, status);
         }
         else
         {
-          std::snprintf(title, sizeof(title), "time\nscene / ctrl\n|F weld| L / R\nobject drift\nctrl mean%s",
-                        *status ? "\nstatus" : "");
+          std::snprintf(title, sizeof(title), "time\nscene / ctrl\n%s\nobject drift\nctrl mean%s",
+                        force_label, *status ? "\nstatus" : "");
           std::snprintf(values, sizeof(values), "%.3f s\n%s / %s\n%.2f / %.2f N\n%.2f mm\n%.1f us%s", s.t,
-                        cfg.scene.name.c_str(), controller->name(), s.arm(Arm::Left).weld_wrench.head<3>().norm(),
-                        s.arm(Arm::Right).weld_wrench.head<3>().norm(), 1e3 * (s.object.pose.p - obj_p0).norm(),
+                        cfg.scene.name.c_str(), controller->name(), force_l, force_r, 1e3 * (s.object.pose.p - obj_p0).norm(),
                         st.steps ? st.ctrl_sum_us / st.steps : 0.0, status);
         }
         viewer.render(env.data(), title, values);
@@ -660,16 +832,59 @@ int main(int argc, char **argv)
     }
     std::printf("[run_sim] object: max drift from initial position %.2f mm, final drift %.2f mm\n",
                 1e3 * st.obj_dev_max, 1e3 * (fin.object.pose.p - obj_p0).norm());
-    std::printf("[run_sim] max |weld force|: left %.2f N, right %.2f N | steps with torque saturation: %.0f\n",
-                st.weld_force_max[0], st.weld_force_max[1], st.tau_sat_steps);
+    if (cfg.contact_grasp)
+    {
+      std::printf("[run_sim] finger contact normals L1/L2/R1/R2: %.2f / %.2f / %.2f / %.2f N\n",
+                  env.fingerContactNormal(Arm::Left, 0), env.fingerContactNormal(Arm::Left, 1),
+                  env.fingerContactNormal(Arm::Right, 0), env.fingerContactNormal(Arm::Right, 1));
+      std::printf("[run_sim] finger contact tangents L1/L2/R1/R2: %.2f / %.2f / %.2f / %.2f N\n",
+                  env.fingerContactTangent(Arm::Left, 0), env.fingerContactTangent(Arm::Left, 1),
+                  env.fingerContactTangent(Arm::Right, 0), env.fingerContactTangent(Arm::Right, 1));
+      std::printf("[run_sim] contact sliding mu L1/L2/R1/R2: %.2f / %.2f / %.2f / %.2f\n",
+                  env.fingerContactMu(Arm::Left, 0), env.fingerContactMu(Arm::Left, 1),
+                  env.fingerContactMu(Arm::Right, 0), env.fingerContactMu(Arm::Right, 1));
+      std::printf("[run_sim] finger openings L1/L2/R1/R2: %.4f / %.4f / %.4f / %.4f m\n",
+                  env.fingerOpening(Arm::Left, 0), env.fingerOpening(Arm::Left, 1),
+                  env.fingerOpening(Arm::Right, 0), env.fingerOpening(Arm::Right, 1));
+      std::printf("[run_sim] grasp welds inactive; legacy weld_wrench log columns are zero\n");
+      std::printf("[run_sim] grasp alignment: %s | task started at t=%.3f s\n",
+                  GraspAlignment::phaseName(alignment.phase()), task_started ? task_start_time : -1.0);
+      for (Arm a : kArms)
+      {
+        const int site = env.indices()[a].grasp_site;
+        const Pose gs = poseFromMjMat(env.data()->site_xpos + 3 * site,
+                                      env.data()->site_xmat + 9 * site);
+        const Vector6d error = poseError(gs, env.eePose(a));
+        std::printf("[run_sim] %s final TCP-grasp error %.2f mm / %.2f deg, dp=[%.1f %.1f %.1f] mm\n", armName(a),
+                    1e3 * error.head<3>().norm(), error.tail<3>().norm() * 180.0 / M_PI,
+                    1e3 * error[0], 1e3 * error[1], 1e3 * error[2]);
+      }
+      const Vector6d task_error = poseError(env.scene().waypoints.back().pose, fin.object.pose);
+      std::printf("[run_sim] final task pose error %.2f mm / %.2f deg\n",
+                  1e3 * task_error.head<3>().norm(), task_error.tail<3>().norm() * 180.0 / M_PI);
+      if (cfg.scene.name == "assembly")
+        std::printf("[run_sim] right joint7 final %.1f deg, torque %.2f N.m\n",
+                    fin.arm(Arm::Right).q[6] * 180.0 / M_PI, fin.arm(Arm::Right).tau[6]);
+      std::printf("[run_sim] grasp loss: %ld steps; max TCP-grasp position error %.2f mm\n",
+                  st.grasp_loss_steps, 1e3 * st.max_grasp_position_error);
+    }
+    else
+    {
+      std::printf("[run_sim] max |weld force|: left %.2f N, right %.2f N | steps with torque saturation: %.0f\n",
+                  st.weld_force_max[0], st.weld_force_max[1], st.tau_sat_steps);
+    }
     if (fin.screw.valid)
     {
       std::printf("[run_sim] screw: angle %.2f deg, feed %.4f mm, resisting torque %.3f N·m\n",
                   fin.screw.angle * 180.0 / M_PI, 1e3 * fin.screw.feed, fin.screw.tauResist());
       monitor.update(fin);
-      std::printf("[run_sim] axial preload: F/T %.2f N, weld %.2f N (target %.2f N)\n",
-                  -monitor.value("work_ft_axial"), -monitor.value("work_weld_axial"),
-                  cfg.asym_coop.axial_preload_force);
+      if (cfg.contact_grasp)
+        std::printf("[run_sim] axial preload: F/T %.2f N (target %.2f N); weld channel inactive\n",
+                    -monitor.value("work_ft_axial"), cfg.asym_coop.axial_preload_force);
+      else
+        std::printf("[run_sim] axial preload: F/T %.2f N, weld %.2f N (target %.2f N)\n",
+                    -monitor.value("work_ft_axial"), -monitor.value("work_weld_axial"),
+                    cfg.asym_coop.axial_preload_force);
       if (asym_controller)
       {
         std::printf("[run_sim] assembly phase: %s | tightening torque ref/meas %.3f / %.3f N·m\n",
@@ -731,6 +946,36 @@ int main(int argc, char **argv)
     {
       std::fprintf(stderr, "[run_sim] SIMULATION DIVERGED at t = %.4f s\n", fin.t);
       return 1;
+    }
+    if (args.check_contact)
+    {
+      const Vector6d error = poseError(env.scene().waypoints.back().pose, fin.object.pose);
+      bool good = error.head<3>().norm() < 0.02 && error.tail<3>().norm() < 10.0 * M_PI / 180.0;
+      good &= task_started && st.grasp_loss_steps == 0 && st.max_grasp_position_error < 0.03;
+      for (Arm a : kArms)
+        for (int f = 0; f < 2; ++f)
+          good &= env.fingerContactNormal(a, f) > 1.0;
+      if (cfg.scene.name == "slot")
+        good &= qp_coop_controller && qp_coop_controller->qpStatus() == JointSafetyTorqueQp::Status::Solved;
+      if (cfg.scene.name == "assembly")
+      {
+        const bool asym = qp_asym_controller || asym_controller;
+        const auto phase = qp_asym_controller ? qp_asym_controller->phase()
+                           : asym_controller  ? asym_controller->phase()
+                                              : AsymmetricCoopController::Phase::Preload;
+        const double torque = qp_asym_controller ? qp_asym_controller->measuredTighteningTorque()
+                              : asym_controller  ? asym_controller->measuredTighteningTorque()
+                                                 : 0.0;
+        good &= asym && phase == AsymmetricCoopController::Phase::Hold &&
+                fin.screw.angle < -145.0 * M_PI / 180.0 &&
+                std::abs(torque - cfg.asym_coop.tightening_torque) < 0.15;
+      }
+      if (!good)
+      {
+        std::fprintf(stderr, "[run_sim] CONTACT TASK CHECK FAILED\n");
+        return 2;
+      }
+      std::printf("[run_sim] CONTACT TASK CHECK PASSED\n");
     }
   }
   catch (const std::exception &e)

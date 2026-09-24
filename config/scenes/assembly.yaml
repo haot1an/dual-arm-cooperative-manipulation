@@ -1,6 +1,6 @@
 # 场景 2：左手固定工件 + 右手旋拧螺钉（非对称协作）—— SceneSpec
 name: assembly
-description: 左臂持握工件（持握臂），右臂用套筒拧螺钉（作业臂）；闭链中含 1 个螺旋副，相对自由度 1
+description: 左臂持握工件（持握臂），右臂用内六角螺丝刀拧螺钉（作业臂）；闭链中含 1 个螺旋副，相对自由度 1
 model: models/scene_assembly.xml
 
 object:
@@ -9,7 +9,8 @@ object:
 
 grasps:
   left:  {site: grasp_L, weld: weld_L, finger_opening: 0.026}     # 夹工件（宽 0.05 m）
-  right: {site: grasp_R, weld: weld_tool, finger_opening: 0.007}  # 夹工具杆（直径 0.012 m）
+  # 夹螺丝刀手柄（直径 0.032 m）；接触模式闭合目标 0.002 m → 夹持力达执行器上限 35 N，保证拧紧扭矩
+  right: {site: grasp_R, weld: weld_tool, finger_opening: 0.017, contact_squeeze: 0.015}
 
 # 闭链：左臂 → 工件 → 螺钉 → 工具 → 右臂。两臂之间的总相对自由度 = Σ relative_dof = 1 → 内力空间维数 5。
 constraints:

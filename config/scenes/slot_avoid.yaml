@@ -7,8 +7,9 @@ object:
   geom: plate_geom
 
 grasps:
-  left:  {site: grasp_L, weld: weld_L, finger_opening: 0.011}
-  right: {site: grasp_R, weld: weld_R, finger_opening: 0.011}
+  # contact_depth：接触模式下抓取点再向板内 15 mm（TCP 距端面 25 mm，指垫完整压在板上，手掌离端面 12 mm）
+  left:  {site: grasp_L, weld: weld_L, finger_opening: 0.011, contact_depth: 0.015}
+  right: {site: grasp_R, weld: weld_R, finger_opening: 0.011, contact_depth: 0.015}
 
 constraints:
   - {name: weld_L, type: rigid, body1: left_hand, body2: plate, relative_dof: 0}
@@ -68,3 +69,6 @@ overrides:
         avoidance_offset: 0.15
         offset_speed: 0.12
         preferred_direction: [0.0, 0.0, 1.0]
+        # cbf：连续偏移 + 虚拟时间的 CBF 参考滤波（docs/cbf_reference_governor.md）；
+        # state_machine：原 NORMAL→LIFT→CROSS→DESCEND（上面 trigger/release/avoidance_offset 等只用于它）
+        mode: cbf
