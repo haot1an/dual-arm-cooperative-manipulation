@@ -18,6 +18,6 @@ __pycache__/
 *.swp
 .DS_Store
 
-# docs 下的文档与学习笔记只留本地；docs/img（README 动图）照常上传
+
 docs/**/*.md
 docs/learning/

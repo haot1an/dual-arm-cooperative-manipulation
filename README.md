@@ -129,17 +129,17 @@ python3 scripts/run_nullspace_transport_demo.py --record --media-dir docs/img
 
 ```mermaid
 flowchart LR
-    W[Scene waypoints] --> PL[Trajectory optimizer<br/>SE3 + time, offline]
-    PL --> T[Object trajectory]
-    T --> G[CBF reference filter<br/>1 kHz]
-    S[DualArmState] --> G
-    C[Collision distances<br/>and gradients] --> G
-    G --> N[Cooperative controller<br/>object impedance + load sharing]
-    C --> NS[Joint nullspace task]
+    W["场景航点"] --> PL["轨迹优化<br/>SE(3) + 时间，离线"]
+    PL --> T["物体参考轨迹"]
+    T --> G["CBF 参考滤波<br/>1 kHz"]
+    S["双臂状态<br/>关节、F/T、物体位姿"] --> G
+    C["碰撞距离与梯度"] --> G
+    G --> N["协同控制律<br/>物体阻抗 + 负载分配"]
+    C --> NS["关节零空间任务"]
     NS --> N
-    N --> Q[Fixed-size torque QP]
+    N --> Q["固定尺寸力矩 QP"]
     C --> Q
-    Q --> P[MuJoCo plant]
+    Q --> P["MuJoCo 仿真"]
     P --> S
 ```
 
