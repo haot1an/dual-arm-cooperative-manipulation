@@ -63,6 +63,7 @@ public:
   static const char* governorPhaseName(GovernorPhase phase);
   const Vector14d& torqueLowerBound() const { return lower_bound_; }
   const Vector14d& torqueUpperBound() const { return upper_bound_; }
+  const NullspaceDiagnostics& nullspaceDiagnostics() const { return nominal_controller_.nullspaceDiagnostics(); }
 
 private:
   CoopController nominal_controller_;

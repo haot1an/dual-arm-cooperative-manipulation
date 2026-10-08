@@ -141,6 +141,25 @@ namespace dual_arm
     double load_share_left = 0.5;
   };
 
+  /// 关节冗余任务；限位/避障是软目标，安全约束仍由 torque QP 处理。
+  struct NullspaceConfig
+  {
+    bool enabled = false;
+    /// dynamic：τ 投影 Nᵀ = M Z (Zᵀ M Z)⁻¹ Zᵀ（J M⁻¹ τ_ns = 0，默认）；
+    /// kinematic：正交投影 Z Zᵀ = I − J⁺J，只用于对照实验（会漏进末端加速度）。
+    enum class Projection { Dynamic, Kinematic };
+    Projection projection = Projection::Dynamic;
+    double ramp_time = 1.0;
+    double max_torque = 6.0;          ///< [N m] 投影后统一缩放，保持零空间方向
+    double rank_tolerance = 1e-6;    ///< 相对最大奇异值的截断阈值
+    double rotation_length = 0.3;    ///< [m] Jacobian 角速度行的尺度
+    double joint_limit_activation = 0.3; ///< [rad] 距限位小于此值时激活
+    double joint_limit_gain = 20.0;  ///< [N m/rad] 限位软势能增益
+    bool avoidance_enabled = true;
+    double activation_distance = 0.1; ///< [m] 机械臂距离势能激活距离
+    double avoidance_gain = 500.0;   ///< [N/m] 二次距离势能增益
+  };
+
   /// 对称协同控制器参数。
   struct CoopConfig
   {
@@ -161,6 +180,7 @@ namespace dual_arm
     double load_share_left = 0.5;
     double nullspace_kp = 0.0;
     double nullspace_kd = 0.0;
+    NullspaceConfig nullspace;
 
     /// 仅 contact_grasp：分配 h = G_W^+ w_o 时，绕各手指开合轴（指垫法向）的手部力矩权重倍数。
     /// 平行夹爪在该方向只能靠摩擦传约 μ·N·r 的扭矩；加大权重让物体力矩改由两手的力差产生。

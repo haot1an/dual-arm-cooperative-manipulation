@@ -277,6 +277,12 @@ TEST(NoAlloc, CbfGovernorControlLoopDoesNotAllocate)
             0);
 }
 
+TEST(NoAlloc, NullspaceControlLoopDoesNotAllocate)
+{
+  EXPECT_EQ(countAllocationsInControlLoop("qp_coop", "nullspace"), 0);
+  EXPECT_EQ(countAllocationsInControlLoop("coop", "nullspace"), 0);
+}
+
 TEST(NoAlloc, PlannedTrajectoryControlLoopDoesNotAllocate)
 {
   EXPECT_EQ(countAllocationsInControlLoop("qp_coop", "slot_gate"), 0);

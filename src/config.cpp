@@ -649,6 +649,37 @@ namespace dual_arm
         c.load_share_left = readScalar<double>(cp, "load_share_left", c.load_share_left);
         c.nullspace_kp = readScalar<double>(cp, "nullspace_kp", c.nullspace_kp);
         c.nullspace_kd = readScalar<double>(cp, "nullspace_kd", c.nullspace_kd);
+        if (const YAML::Node ns = cp["nullspace"])
+        {
+          auto& n = c.nullspace;
+          n.enabled = readScalar<bool>(ns, "enabled", n.enabled);
+          const std::string projection = readScalar<std::string>(ns, "projection", "dynamic");
+          if (projection == "dynamic")
+            n.projection = NullspaceConfig::Projection::Dynamic;
+          else if (projection == "kinematic")
+            n.projection = NullspaceConfig::Projection::Kinematic;
+          else
+            throw std::runtime_error("coop.nullspace.projection must be dynamic | kinematic");
+          n.ramp_time = readScalar<double>(ns, "ramp_time", n.ramp_time);
+          n.max_torque = readScalar<double>(ns, "max_torque", n.max_torque);
+          n.rank_tolerance = readScalar<double>(ns, "rank_tolerance", n.rank_tolerance);
+          n.rotation_length = readScalar<double>(ns, "rotation_length", n.rotation_length);
+          n.joint_limit_activation = readScalar<double>(ns, "joint_limit_activation", n.joint_limit_activation);
+          n.joint_limit_gain = readScalar<double>(ns, "joint_limit_gain", n.joint_limit_gain);
+          n.avoidance_enabled = readScalar<bool>(ns, "avoidance_enabled", n.avoidance_enabled);
+          n.activation_distance = readScalar<double>(ns, "activation_distance", n.activation_distance);
+          n.avoidance_gain = readScalar<double>(ns, "avoidance_gain", n.avoidance_gain);
+        }
+        const auto& n = c.nullspace;
+        const double ns_scalars[] = {c.nullspace_kp, c.nullspace_kd, n.ramp_time, n.max_torque,
+            n.rank_tolerance, n.rotation_length, n.joint_limit_activation, n.joint_limit_gain,
+            n.activation_distance, n.avoidance_gain};
+        for (double value : ns_scalars)
+          if (!std::isfinite(value) || value < 0.0)
+            throw std::runtime_error("coop.nullspace gains and scales must be finite and non-negative");
+        if (!(n.max_torque > 0.0) || !(n.rank_tolerance > 0.0) || n.rank_tolerance >= 1.0 ||
+            !(n.rotation_length > 0.0) || !(n.joint_limit_activation > 0.0) || !(n.activation_distance > 0.0))
+          throw std::runtime_error("coop.nullspace thresholds are invalid");
         c.contact_torsion_weight =
             readScalar<double>(cp, "contact_torsion_weight", c.contact_torsion_weight);
         if (!(c.contact_torsion_weight >= 1.0))

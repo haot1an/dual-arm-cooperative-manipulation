@@ -1,0 +1,41 @@
+<!-- Static dual-arm nullspace avoidance: plate held still, elbows clear the red fixtures. -->
+<mujoco model="scene_nullspace">
+  <include file="workcell.xml" />
+  <worldbody>
+    <camera name="cam_demo" pos="0 -2.4 1.95" xyaxes="1 0 0 0 0.383 0.924" fovy="36" />
+    <camera name="cam_iso" pos="1.05 1.15 2.3" xyaxes="-0.8466 0.5323 0.0000 -0.3006 -0.4781 0.8253" />
+    <camera name="cam_front" pos="0.55 -2.15 2" xyaxes="0.9475 0.3197 0.0000 -0.1666 0.4936 0.8536" />
+    <body name="plate" pos="0 -0.4500 0.8760">
+      <freejoint name="plate_joint" />
+      <geom name="plate_geom" type="box" size="0.3000 0.1000 0.0100" mass="1.2" material="wood" friction="0.8 0.02 0.001" />
+      <site name="grasp_L" pos="0.2900 0 0" quat="0.5 -0.5 -0.5 0.5" size="0.008" rgba="0 0.8 0 1" />
+      <site name="grasp_R" pos="-0.2900 0 0" quat="-0.5 0.5 -0.5 0.5" size="0.008" rgba="0 0.8 0 1" />
+      <site name="plate_center" size="0.008" rgba="0 0 1 1" />
+    </body>
+    <body name="post_L" pos="0.67 -0.22 1.285">
+      <geom name="post_L" type="sphere" size="0.035" material="obstacle" contype="1" conaffinity="1" />
+      <geom name="post_L_stand" type="cylinder" size="0.012 0.25" pos="0 0 -0.285" material="prop_dark" contype="0" conaffinity="0" />
+    </body>
+    <body name="post_R" pos="-0.67 -0.22 1.285">
+      <geom name="post_R" type="sphere" size="0.035" material="obstacle" contype="1" conaffinity="1" />
+      <geom name="post_R_stand" type="cylinder" size="0.012 0.25" pos="0 0 -0.285" material="prop_dark" contype="0" conaffinity="0" />
+    </body>
+  </worldbody>
+  <equality>
+    <weld name="weld_L" body1="left_hand" body2="plate" anchor="0.2900 0 0" solref="0.004 1" solimp="0.95 0.99 0.001 0.5 2" />
+    <weld name="weld_R" body1="right_hand" body2="plate" anchor="-0.2900 0 0" solref="0.004 1" solimp="0.95 0.99 0.001 0.5 2" />
+  </equality>
+  <contact>
+    <exclude body1="left_hand" body2="plate" />
+    <exclude body1="left_left_finger" body2="plate" />
+    <exclude body1="left_right_finger" body2="plate" />
+    <exclude body1="left_link7" body2="plate" />
+    <exclude body1="right_hand" body2="plate" />
+    <exclude body1="right_left_finger" body2="plate" />
+    <exclude body1="right_right_finger" body2="plate" />
+    <exclude body1="right_link7" body2="plate" />
+  </contact>
+  <keyframe>
+    <key name="init" qpos="0.82126 0.609877 -0.273083 -2.2449 -1.20616 1.61184 -1.12358 -0.871891 0.618396 0.323701 -2.24691 1.18778 1.63681 -0.439111 0 -0.45 0.876 1 0 0 0" />
+  </keyframe>
+</mujoco>

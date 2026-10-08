@@ -19,7 +19,7 @@ QpCoopController::QpCoopController(
     double timestep,
     bool contact_grasp)
     : Controller(model),
-      nominal_controller_(model, trajectory, coop_config, contact_grasp),
+      nominal_controller_(model, trajectory, coop_config, contact_grasp, collision_config, timestep, true),
       trajectory_(std::move(trajectory)),
       qp_config_(qp_config),
       timestep_(timestep),
@@ -44,7 +44,8 @@ QpCoopController::QpCoopController(
   }
 
   if ((qp_config_.collision_avoidance_enabled ||
-       qp_config_.reference_governor.enabled) &&
+       qp_config_.reference_governor.enabled ||
+       (coop_config.nullspace.enabled && coop_config.nullspace.avoidance_enabled)) &&
       !scene().obstacles.empty())
   {
     CollisionConfig controller_collision_config = collision_config;
@@ -53,7 +54,9 @@ QpCoopController::QpCoopController(
     const double governor_range = !governor.enabled ? 0.0
         : cbf_mode ? governor.cbf.escape_activation + governor.cbf.safe_distance + 0.01
                    : governor.trigger_distance;
-    controller_collision_config.margin = std::max(qp_config_.collision_influence_distance, governor_range);
+    controller_collision_config.margin = std::max({qp_config_.collision_influence_distance, governor_range,
+        coop_config.nullspace.enabled && coop_config.nullspace.avoidance_enabled
+            ? coop_config.nullspace.activation_distance : 0.0});
     controller_collision_config.threads = qp_config_.collision_threads;
     collision_model_ = std::make_unique<CollisionModel>(
         scene(),
@@ -271,7 +274,7 @@ std::pair<Vector7d, Vector7d> QpCoopController::compute(
   }
 
   const auto [nominal_left, nominal_right] =
-      nominal_controller_.computeWithReference(state, governed_reference_);
+      nominal_controller_.computeWithReference(state, governed_reference_, collision_distances);
 
   Vector14d desired_torque;
   desired_torque.head<kArmDof>() = nominal_left;

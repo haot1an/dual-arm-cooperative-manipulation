@@ -124,6 +124,19 @@ controller:
     load_share_left: 0.5         # 加权伪逆中左臂承担的负载份额（0..1），见文档 §5
     nullspace_kp: 10.0
     nullspace_kd: 2.0
+    # 关节运动零空间：保护两手 TCP，与 null(G) 内力空间不同。
+    nullspace:
+      enabled: false              # 显式开启；当前仅支持 coop / qp_coop 的 rigid grasp
+      projection: dynamic         # dynamic：Nᵀ（默认）；kinematic：I − J⁺J，仅作对照（不保证末端解耦）
+      ramp_time: 1.0               # [s] smoothstep 启动
+      max_torque: 6.0              # [N m] 投影后统一缩放，保持零空间方向
+      rank_tolerance: 1.0e-6       # scaled Jacobian 相对奇异值阈值
+      rotation_length: 0.3         # [m] 角速度行尺度
+      joint_limit_activation: 0.3 # [rad] 限位软势能预警区
+      joint_limit_gain: 20.0       # [N m/rad]
+      avoidance_enabled: true     # 只优化机械臂距离；物体距离由 planner / CBF 处理
+      activation_distance: 0.1    # [m] 每个障碍组只用最近 geom pair
+      avoidance_gain: 500.0       # [N/m] 距离二次势能增益
     internal_wrench_ramp_time: 0.5  # [s]
     # 仅 contact_grasp：绕指垫法向的手部力矩在分配中的权重倍数（≥ 1；1 = 与 weld 相同的等权分配）。
     # 平行夹爪只能靠摩擦传该方向扭矩，等权分配会把 ~92% 的俯仰力矩压到这个弱方向上。

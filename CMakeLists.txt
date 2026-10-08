@@ -71,6 +71,7 @@ add_library(dual_arm_core
   src/object_trajectory.cpp
   src/coop_kinematics.cpp
   src/coop_controller.cpp
+  src/nullspace_task.cpp
   src/asym_coop_controller.cpp
   src/torque_qp.cpp
   src/qp_coop_controller.cpp
@@ -156,6 +157,7 @@ if(DUAL_ARM_BUILD_TESTS)
     tests/test_calibration.cpp
     tests/test_scene_geometry.cpp
     tests/test_coop_template.cpp
+    tests/test_nullspace.cpp
     tests/test_collision_model.cpp
     tests/test_scenes.cpp
     tests/test_trajectory.cpp

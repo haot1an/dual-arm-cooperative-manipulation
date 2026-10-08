@@ -15,6 +15,7 @@
     timing.png           单周期控制器计算耗时
     internal_force.png   内力 h_int（int_* 列）
     governor.png         reference governor 阶段、偏移与障碍距离
+    nullspace.png        关节零空间力矩、投影残差与关节余量
 
 只依赖 numpy + matplotlib。
 """
@@ -329,6 +330,26 @@ def plot_governor(plt, runs: list[Run], out_dir: str, show: bool):
     save(fig, out_dir, "governor.png", show)
 
 
+def plot_nullspace(plt, runs: list[Run], out_dir: str, show: bool):
+    valid = [r for r in runs if r.has("ns_torque_norm") and np.any(r["ns_min_rank"] > 0)]
+    if not valid:
+        return
+    fig, axes = plt.subplots(3, 1, figsize=(11, 7.5), sharex=True)
+    for i, r in enumerate(valid):
+        color = SERIES[i % len(SERIES)]
+        axes[0].plot(r.t, r["ns_torque_norm"], color=color, label=r.label)
+        axes[1].semilogy(r.t, np.maximum(r["ns_acceleration_leak"], 1e-18), color=color)
+        axes[2].plot(r.t, np.degrees(r["ns_joint_margin"]), color=color)
+    axes[0].set_ylabel("||tau_ns|| [N m]")
+    axes[1].set_ylabel("||J M^-1 tau_ns||")
+    axes[2].set_ylabel("joint margin [deg]")
+    axes[2].set_xlabel("t [s]")
+    axes[0].legend()
+    fig.suptitle("Joint nullspace task (diagnostics before torque QP)")
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    save(fig, out_dir, "nullspace.png", show)
+
+
 def print_summary(runs: list[Run]):
     for r in runs:
         drift = np.sqrt(sum((r[f"obj_{k}"] - r[f"obj_{k}"][0]) ** 2 for k in "xyz"))
@@ -381,6 +402,7 @@ def main():
     plot_timing(plt, runs, out_dir, args.show)
     plot_internal_force(plt, runs, out_dir, args.show)
     plot_governor(plt, runs, out_dir, args.show)
+    plot_nullspace(plt, runs, out_dir, args.show)
     if args.show:
         plt.show()
 

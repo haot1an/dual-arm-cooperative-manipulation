@@ -51,6 +51,16 @@ struct LogRow {
   double governor_virtual_time = 0.0;
   double ctrl_time_us = 0.0;
   double step_time_us = 0.0;
+  double nullspace_torque_norm = 0.0;
+  double nullspace_acceleration_leak = 0.0;
+  double nullspace_joint_margin = 0.0;
+  double nullspace_avoidance_norm = 0.0;
+  int nullspace_active_pairs = 0;
+  int nullspace_min_rank = 0;
+  double qp_closed_chain_residual = 0.0;
+  double qp_collision_slack = 0.0;
+  int qp_status = 0;
+  double qp_constraint_violation = 0.0;
   const double* extra = nullptr;               ///< 场景列的值（个数 = setExtraColumns 的列数）
 };
 

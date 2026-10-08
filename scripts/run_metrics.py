@@ -138,6 +138,9 @@ def analyze_rows(rows: list[dict[str, float]]) -> dict[str, Any]:
             for name in sorted(names)
             if name.startswith("d_")
         },
+        "distance_final_mm": {
+            name[2:]: 1e3 * rows[-1][name] for name in sorted(names) if name.startswith("d_")
+        },
         "governor_triggers": triggers,
         "governor_max_offset_mm": 1e3 * max(offsets),
         "governor_active_s": dt * sum(phase != 0 for phase in phases),
@@ -162,6 +165,23 @@ def analyze_rows(rows: list[dict[str, float]]) -> dict[str, Any]:
             metrics[metric] = scale * rows[-1][column]
     if "screw_angle" in names:
         metrics["screw_angle_final_deg"] = math.degrees(rows[-1]["screw_angle"])
+    if "ns_torque_norm" in names:
+        metrics["nullspace"] = {
+            "torque_norm_max_nm": max(row["ns_torque_norm"] for row in rows),
+            "acceleration_leak_max": max(row["ns_acceleration_leak"] for row in rows),
+            "projected_avoidance_norm_max_nm": max(row["ns_avoidance_norm"] for row in rows),
+            "active_pairs_max": max(row["ns_active_pairs"] for row in rows),
+            "joint_margin_min_deg": math.degrees(min(row["ns_joint_margin"] for row in rows)),
+            "closed_chain_residual_max": max(row["qp_closed_chain_residual"] for row in rows),
+            "collision_slack_max": max(row["qp_collision_slack"] for row in rows),
+        }
+    if "qp_status" in names:
+        metrics["qp"] = {
+            "invalid_steps": sum(int(row["qp_status"]) in (2, 3) for row in rows),
+            "max_iterations_steps": sum(int(row["qp_status"]) == 1 for row in rows),
+            "status_final": int(rows[-1]["qp_status"]),
+            "constraint_violation_max": max(row["qp_constraint_violation"] for row in rows),
+        }
     return metrics
 
 

@@ -20,7 +20,7 @@
  *   4) 内力调节：h_r,cmd = h_r,des + K_f (h_r,des − h_r,meas)                             (6.4)
  *      或“相对空间柔顺”：h_r,cmd = K_r e_r + D_r ė_r                                      (6.5)
  *   5) 分配：h = G_W^+ w_o + V h_r,cmd                                                    (4.3/4.9)
- *   6) 力矩映射：τ_i = J_iᵀ h_i + h_i(q,dq) + N_i τ_0,i                                    (6.1)
+ *   6) 力矩映射：τ_i = J_iᵀ h_i + h_i(q,dq) + N_i^T τ_0,i（动态一致力矩投影）                 (6.1)
  *   7) QpCoopController 在名义力矩之上统一处理闭链约束、关节/力矩限位、防碰撞
  *      （CollisionModel 提供 d、∂d/∂q；进入 QP 的方式见 collision_model.hpp）             (6.6)
  *   8) 把需要看的中间量（期望内力、物体误差……）写进成员变量，方便调试/日志扩展
@@ -29,6 +29,7 @@
 #include "dual_arm/controller.hpp"
 #include "dual_arm/object_trajectory.hpp"
 #include "dual_arm/robot_model.hpp"
+#include "dual_arm/nullspace_task.hpp"
 
 #include <memory>
 
@@ -39,7 +40,9 @@ namespace dual_arm
   {
   public:
     CoopController(std::shared_ptr<RobotModel> model, std::shared_ptr<const ObjectTrajectory> trajectory,
-                   const CoopConfig &params, bool contact_grasp = false);
+                   const CoopConfig &params, bool contact_grasp = false,
+                   const CollisionConfig &collision_config = {}, double timestep = 0.001,
+                   bool external_collision_source = false);
 
     const char *name() const override { return "coop"; }
     void reset(const DualArmState &initial_state) override;
@@ -47,12 +50,16 @@ namespace dual_arm
     /// 使用外部生成的物体参考；供 reference governor / MPC 包装器复用协同控制律。
     std::pair<Vector7d, Vector7d> computeWithReference(
         const DualArmState &state,
-        const ObjectReference &reference);
+        const ObjectReference &reference,
+        const std::vector<DistanceInfo>* distances = nullptr);
+    const NullspaceDiagnostics& nullspaceDiagnostics() const { return nullspace_task_.diagnostics(); }
 
   private:
     std::shared_ptr<const ObjectTrajectory> trajectory_;
     CoopConfig params_;
     bool contact_grasp_ = false;
+    NullspaceTask nullspace_task_;
+    std::unique_ptr<CollisionModel> nullspace_collision_;
 
     /// 根据当前物体位姿构造 G = [G_left, G_right]。
     Matrix6x12d makeGraspMatrix(
@@ -78,7 +85,6 @@ namespace dual_arm
     /// 本周期实际使用的 W；接触夹取时在 load_weight_ 上加重绕指垫法向的力矩项。
     Matrix12d allocationWeight() const;
 
-    std::array<Vector7d, kNumArms> q_init_; ///< 初始构型（可用于零空间姿态保持）
   };
 
 } // namespace dual_arm

@@ -31,7 +31,7 @@
 
   <visual>
     <headlight diffuse="0.55 0.55 0.55" ambient="0.35 0.35 0.35" specular="0 0 0"/>
-    <rgba haze="0.93 0.93 0.93 1"/>
+    <rgba haze="0.10 0.11 0.13 1"/>
     <global azimuth="-125" elevation="-25" offwidth="1600" offheight="1200"/>
     <quality shadowsize="4096"/>
     <scale forcewidth="0.02" contactwidth="0.05" contactheight="0.02" framelength="0.12" framewidth="0.006"/>
@@ -40,9 +40,9 @@
   <asset>
     <model name="panda" file="panda_hand_torque.xml"/>
 
-    <texture type="skybox" builtin="gradient" rgb1="0.97 0.97 0.97" rgb2="0.80 0.82 0.85" width="512" height="3072"/>
+    <texture type="skybox" builtin="gradient" rgb1="0.22 0.24 0.28" rgb2="0.06 0.07 0.09" width="512" height="3072"/>
     <!-- 素色地板 + 淡网格（0.25 m 一格） -->
-    <texture type="2d" name="floor_grid" builtin="flat" mark="edge" rgb1="0.90 0.90 0.89" markrgb="0.80 0.80 0.79"
+    <texture type="2d" name="floor_grid" builtin="flat" mark="edge" rgb1="0.16 0.17 0.19" markrgb="0.26 0.27 0.30"
       width="512" height="512"/>
     <material name="floor" texture="floor_grid" texuniform="true" texrepeat="4 4" reflectance="0.05"/>
     <material name="table_top" rgba="0.72 0.64 0.52 1" specular="0.1"/>

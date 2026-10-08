@@ -107,6 +107,30 @@
         {"metric": "torque_saturation_steps", "op": "eq", "value": 0}
       ]
     },
+    "nullspace": {
+      "run": {
+        "scene": "nullspace",
+        "controller": "qp_coop",
+        "duration": 12,
+        "overrides": ["log.decimation=1"]
+      },
+      "checks": [
+        {"metric": "position_error_max_mm", "op": "lt", "value": 1.2},
+        {"metric": "position_error_final_mm", "op": "lt", "value": 0.01},
+        {"metric": "orientation_error_max_deg", "op": "lt", "value": 0.12},
+        {"metric": "distance_min_mm.left_arm~post_L", "op": "gt", "value": 10.0},
+        {"metric": "distance_min_mm.right_arm~post_R", "op": "gt", "value": 10.0},
+        {"metric": "distance_final_mm.left_arm~post_L", "op": "gt", "value": 100.0},
+        {"metric": "distance_final_mm.right_arm~post_R", "op": "gt", "value": 100.0},
+        {"metric": "nullspace.torque_norm_max_nm", "op": "gt", "value": 0.1},
+        {"metric": "nullspace.acceleration_leak_max", "op": "lt", "value": 1e-10},
+        {"metric": "nullspace.collision_slack_max", "op": "lt", "value": 1e-8},
+        {"metric": "qp.invalid_steps", "op": "eq", "value": 0},
+        {"metric": "qp.status_final", "op": "eq", "value": 0},
+        {"metric": "qp.constraint_violation_max", "op": "lt", "value": 0.002},
+        {"metric": "torque_saturation_steps", "op": "eq", "value": 0}
+      ]
+    },
     "assembly": {
       "run": {
         "scene": "assembly",

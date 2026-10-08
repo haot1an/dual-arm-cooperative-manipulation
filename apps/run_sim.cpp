@@ -199,7 +199,7 @@ namespace
           cfg.cartesian_impedance);
     }
     if (cfg.controller == "coop")
-      return std::make_unique<CoopController>(model, traj, cfg.coop, cfg.contact_grasp);
+      return std::make_unique<CoopController>(model, traj, cfg.coop, cfg.contact_grasp, cfg.collision, cfg.timestep);
     if (cfg.controller == "qp_coop")
       return std::make_unique<QpCoopController>(
           model,
@@ -415,6 +415,7 @@ int main(int argc, char **argv)
     auto *qp_coop_controller =
         dynamic_cast<QpCoopController *>(
             controller.get());
+    auto *coop_controller = dynamic_cast<CoopController *>(controller.get());
     // 接触夹取：各臂抓取点 = 被抓 body 的实测位姿 × site_in_body（相当于视觉定位）
     auto graspTargets = [&]()
     {
@@ -660,6 +661,24 @@ int main(int argc, char **argv)
         }
         row.ctrl_time_us = ctrl_us;
         row.step_time_us = step_us;
+        if (coop_controller || qp_coop_controller)
+        {
+          const auto& ns = qp_coop_controller ? qp_coop_controller->nullspaceDiagnostics()
+                                              : coop_controller->nullspaceDiagnostics();
+          row.nullspace_torque_norm = ns.torque_norm;
+          row.nullspace_acceleration_leak = ns.acceleration_leak;
+          row.nullspace_joint_margin = ns.joint_margin;
+          row.nullspace_avoidance_norm = ns.projected_avoidance_norm;
+          row.nullspace_active_pairs = ns.active_pairs;
+          row.nullspace_min_rank = ns.min_rank;
+        }
+        if (qp_coop_controller)
+        {
+          row.qp_closed_chain_residual = qp_coop_controller->closedChainAccelerationResidual();
+          row.qp_collision_slack = qp_coop_controller->maxCollisionSlack();
+          row.qp_status = static_cast<int>(qp_coop_controller->qpStatus());
+          row.qp_constraint_violation = qp_coop_controller->maxConstraintViolation();
+        }
         row.extra = monitor.values().data();
         logger.write(row);
       }

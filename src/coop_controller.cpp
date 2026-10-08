@@ -14,16 +14,32 @@ namespace dual_arm
       std::shared_ptr<RobotModel> model,
       std::shared_ptr<const ObjectTrajectory> trajectory,
       const CoopConfig &params,
-      bool contact_grasp)
+      bool contact_grasp,
+      const CollisionConfig &collision_config,
+      double timestep,
+      bool external_collision_source)
       : Controller(std::move(model)),
         trajectory_(std::move(trajectory)),
         params_(params),
-        contact_grasp_(contact_grasp)
+        contact_grasp_(contact_grasp),
+        nullspace_task_(params)
   {
     if (!trajectory_)
     {
       throw std::invalid_argument(
           "CoopController: trajectory is null");
+    }
+
+    if (params_.nullspace.enabled && contact_grasp_)
+      throw std::invalid_argument("coop.nullspace currently requires rigid grasp (contact_grasp=false)");
+    if (params_.nullspace.enabled && params_.nullspace.avoidance_enabled &&
+        !external_collision_source && !scene().obstacles.empty())
+    {
+      CollisionConfig collision = collision_config;
+      collision.margin = params_.nullspace.activation_distance;
+      nullspace_collision_ = std::make_unique<CollisionModel>(scene(),
+          std::array<Pose, kNumArms>{model_->basePose(Arm::Left), model_->basePose(Arm::Right)},
+          collision, timestep);
     }
 
     if (scene().relativeDofBetweenHands() != 0)
@@ -47,7 +63,6 @@ namespace dual_arm
       grasp_in_object_[i] =
           scene().grasp[i].site_in_body;
 
-      q_init_[i].setZero();
     }
 
     const double lambda_left =
@@ -98,11 +113,8 @@ namespace dual_arm
   void CoopController::reset(
       const DualArmState &initial_state)
   {
-    for (Arm a : kArms)
-    {
-      q_init_[armIndex(a)] =
-          initial_state.arm(a).q;
-    }
+    reset_time_ = initial_state.t;
+    nullspace_task_.reset(initial_state);
   }
   Matrix6x12d CoopController::makeGraspMatrix(
       const Pose &object_pose) const
@@ -137,10 +149,13 @@ namespace dual_arm
   std::pair<Vector7d, Vector7d>
   CoopController::computeWithReference(
       const DualArmState &state,
-      const ObjectReference &reference)
+      const ObjectReference &reference,
+      const std::vector<DistanceInfo>* distances)
   {
     // 1. 更新控制器侧名义机器人模型。
     model_->update(state);
+    if (nullspace_collision_)
+      distances = &nullspace_collision_->query(state.arm(Arm::Left).q, state.arm(Arm::Right).q);
 
     // 3. 根据当前物体位姿构造抓取矩阵。
     const Pose left_grasp_world =
@@ -250,10 +265,8 @@ namespace dual_arm
             Arm::Right,
             right_hand_wrench);
 
-    return {
-        tau_left,
-        tau_right,
-    };
+    const Vector14d nullspace_torque = nullspace_task_.compute(state, *model_, distances);
+    return {tau_left + nullspace_torque.head<7>(), tau_right + nullspace_torque.tail<7>()};
   }
   Wrench CoopController::computeObjectWrench(
       const ObjectReference &reference,

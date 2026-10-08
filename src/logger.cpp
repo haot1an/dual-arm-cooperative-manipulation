@@ -73,6 +73,10 @@ std::vector<std::string> CsvLogger::columnNames() {
   c.push_back("governor_virtual_time");
   c.push_back("t_ctrl_us");
   c.push_back("t_step_us");
+  for (const char* name : {"ns_torque_norm", "ns_acceleration_leak", "ns_joint_margin",
+                          "ns_avoidance_norm", "ns_active_pairs", "ns_min_rank",
+                          "qp_closed_chain_residual", "qp_collision_slack",
+                          "qp_status", "qp_constraint_violation"}) c.push_back(name);
   return c;
 }
 
@@ -127,6 +131,16 @@ void CsvLogger::write(const LogRow& row) {
   p.add(row.governor_virtual_time);
   p.add(row.ctrl_time_us);
   p.add(row.step_time_us);
+  p.add(row.nullspace_torque_norm);
+  p.add(row.nullspace_acceleration_leak);
+  p.add(row.nullspace_joint_margin);
+  p.add(row.nullspace_avoidance_norm);
+  p.add(row.nullspace_active_pairs);
+  p.add(row.nullspace_min_rank);
+  p.add(row.qp_closed_chain_residual);
+  p.add(row.qp_collision_slack);
+  p.add(row.qp_status);
+  p.add(row.qp_constraint_violation);
   for (std::size_t i = 0; i < extra_names_.size(); ++i) p.add(row.extra ? row.extra[i] : 0.0);
   if (p.n != values_.size()) {
     throw std::logic_error("CsvLogger: packed value count does not match column count");
